@@ -298,6 +298,10 @@ class SessionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("set_cabin_temperature", dispatcher.discovered)
             await session.handle(done([{"type": "message", "content": [{"text": "Set to 22 degrees."}]}]))
         self.assertEqual(session.turn_id, 2)
+        searches = [
+            name for name, _arguments, _result in dispatcher.completed.values() if name == SEARCH_TOOL
+        ]
+        self.assertEqual(searches, [SEARCH_TOOL, SEARCH_TOOL])
 
     async def test_queued_turn_clears_discovery_only_after_current_reply(self):
         conn, dispatcher = connection(), Dispatcher(discovery=True)
