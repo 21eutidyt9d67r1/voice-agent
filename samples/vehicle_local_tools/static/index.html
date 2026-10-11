@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#080c12">
+  <title>AURA / Vehicle voice cockpit</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+  <div class="shell">
+    <header>
+      <a class="brand" href="/" aria-label="Aura cockpit home"><span class="brand-mark">A</span>AURA<span class="brand-sub">CONNECTED DRIVE</span></a>
+      <div class="header-meta"><span class="simulation">SIMULATED VEHICLE</span><span id="clock"></span><span class="avatar">D</span></div>
+    </header>
+    <main>
+      <div class="page-heading">
+        <div><div class="eyebrow">YOUR PERSONAL COCKPIT</div><h1>A little more connected.</h1><p>Your voice in the cloud. Your vehicle controls, right here.</p></div>
+        <div class="local-badge"><span class="status-dot"></span> LOCAL EXECUTION <small>Protected by vehicle policy</small></div>
+      </div>
+      <section class="card process-card" aria-labelledby="process-title">
+        <div class="card-heading"><div><div class="eyebrow">LIVE REQUEST PIPELINE</div><h2 id="process-title">From your voice to a local action.</h2></div><span id="process-pill" class="pill">WAITING FOR A REQUEST</span></div>
+        <ol class="process-steps" aria-label="Request processing stages">
+          <li data-step="listening" data-state="idle"><span class="step-number">01</span><div><strong>Listen</strong><small>Vehicle microphone</small></div></li>
+          <li data-step="understanding" data-state="idle"><span class="step-number">02</span><div><strong>Select action</strong><small>Cloud voice agent</small></div></li>
+          <li data-step="searching" data-state="idle"><span class="step-number">03</span><div><strong>Search tools</strong><small>Local catalog</small></div></li>
+          <li data-step="discovered" data-state="idle"><span class="step-number">04</span><div><strong>Discover</strong><small>Matched definitions</small></div></li>
+          <li data-step="executing" data-state="idle"><span class="step-number">05</span><div><strong>Execute locally</strong><small>Policy + simulator</small></div></li>
+          <li data-step="responding" data-state="idle"><span class="step-number">06</span><div><strong>Reply</strong><small>Actual tool result</small></div></li>
+        </ol>
+        <div id="process-status" class="process-status" role="status"><span class="status-dot"></span><span id="process-detail">Connect voice and speak to see the actual processing events here.</span></div>
+        <div class="process-details">
+          <div><span class="eyebrow">SEARCH QUERY / REQUEST</span><pre id="process-query">No search yet</pre></div>
+          <div><span class="eyebrow">DISCOVERED CAPABILITIES</span><div id="process-matches" class="process-matches"><span class="process-empty">No capabilities discovered this turn</span></div></div>
+          <div><span class="eyebrow">LOCAL EXECUTION</span><pre id="process-result">No local action yet</pre></div>
+        </div>
+        <div class="process-note">Observed service and client events only · no hidden model reasoning · every vehicle request searches again</div>
+      </section>
+      <div class="cockpit-grid">
+        <section class="card vehicle-card" aria-labelledby="vehicle-title">
+          <div class="card-heading"><div><div class="eyebrow">VEHICLE OVERVIEW</div><h2 id="vehicle-title">AURA One <span class="muted">/ Electric</span></h2></div><span class="pill">PARKED</span></div>
+          <div class="car-stage">
+            <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div>
+            <img class="car" src="/static/car.svg" alt="Pearl silver AURA One electric sedan with panoramic glass, machined alloy wheels, and LED headlights" width="885" height="385">
+            <span class="car-label"><span class="status-dot"></span> Vehicle systems online <small>Local simulator</small></span>
+          </div>
+          <div class="vehicle-stats"><div><span class="stat-icon">↯</span><strong>78<span>%</span></strong><small>Battery · demo value</small><div class="battery-track"><i></i></div></div><div><strong>312<span>km</span></strong><small>Range · demo value</small></div><div><strong>0<span>km/h</span></strong><small>Speed · parked simulator</small></div></div>
+          <div class="vehicle-footer"><span>● &nbsp; All actions are simulated</span><span>NO REAL VEHICLE CONNECTED</span></div>
+        </section>
+        <section class="card assistant-card" aria-labelledby="assistant-title">
+          <div class="card-heading"><div><div class="eyebrow">VOICE COMPANION</div><h2 id="assistant-title">Meet your co-pilot.</h2></div><span id="connection-pill" class="pill">OFFLINE</span></div>
+          <div class="voice-visual" aria-hidden="true"><div class="voice-ring"></div><div class="voice-orb"><svg viewBox="0 0 80 80"><path d="M23 38v5m8-15v25m9-33v42m9-34v25m8-17v9" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+          <h3 id="voice-title">Ready when you are.</h3>
+          <p id="voice-caption">Climate, music, or your next destination.<br>Just ask, and your vehicle handles the rest.</p>
+          <button id="connect" class="primary" disabled><span>◉</span> <span id="connect-label">Loading cockpit…</span></button>
+          <div id="voice-status" class="voice-status" role="status">Checking connection mode…</div>
+          <div class="suggestions"><span>TRY SAYING</span><p>“Set the cabin to 22 degrees Celsius.”</p><p>“Turn the volume down to 15 percent.”</p><p>“Navigate to Central Library.”</p></div>
+          <div class="trust-strip"><span>☁ &nbsp; Cloud reasoning</span><i>→</i><span>◇ &nbsp; Local tools</span></div>
+        </section>
+        <section class="card climate-card" aria-labelledby="climate-title">
+          <div class="card-heading"><div><div class="eyebrow">CABIN COMFORT</div><h2 id="climate-title">Your ideal climate.</h2></div><span class="mini-icon">≋</span></div>
+          <div class="temperature-controls"><button id="temp-down" class="round" aria-label="Lower cabin temperature">−</button><div class="temperature"><span id="temperature">21</span><sup>°C</sup><small>CABIN SETPOINT</small></div><button id="temp-up" class="round" aria-label="Raise cabin temperature">+</button></div>
+          <div class="climate-scale"><span>16°</span><div><i id="temp-marker"></i></div><span>30°</span></div>
+          <div class="subtle-row"><span>Local policy range</span><strong>16–30 °C</strong></div>
+        </section>
+        <section class="card navigation-card" aria-labelledby="navigation-title">
+          <div class="map" aria-hidden="true"><div class="map-road r1"></div><div class="map-road r2"></div><div class="map-road r3"></div><svg viewBox="0 0 350 170"><path d="M70 145 70 92 170 92 170 44 276 44" fill="none" stroke="#61ead0" stroke-width="4" stroke-linejoin="round" stroke-dasharray="6 4"/><circle cx="276" cy="44" r="8" fill="#61ead0"/><circle cx="70" cy="145" r="9" fill="#eafff9"/></svg><span class="map-label label-one">CENTRAL DISTRICT</span><span class="map-label label-two">RIVERSIDE</span></div>
+          <div class="nav-content"><div class="eyebrow">NEXT DESTINATION</div><h2 id="navigation-title">Where to next?</h2><p id="destination">No destination selected</p><form id="nav-form"><label class="sr-only" for="destination-input">Simulated destination</label><input id="destination-input" maxlength="200" placeholder="Enter a destination…" required><button type="submit" class="nav-go" aria-label="Set simulated destination">↗</button></form><small>Illustrative map only · no routing or ETA</small></div>
+        </section>
+        <section class="card media-card" aria-labelledby="media-title">
+          <div class="card-heading"><div><div class="eyebrow">SOUND EXPERIENCE</div><h2 id="media-title">Set the mood.</h2></div><span class="mini-icon">♫</span></div>
+          <div class="album-row"><div class="album" aria-hidden="true"><div></div></div><div><strong>Your cabin. Your soundtrack.</strong><p>Volume control simulator</p><span class="pill">NO AUDIO SOURCE</span></div></div>
+          <div class="volume-row"><span>◖</span><label class="sr-only" for="volume">Media volume</label><input type="range" id="volume" min="0" max="60" value="20"><output id="volume-value" for="volume">20%</output></div>
+          <div class="subtle-row"><span>Local volume limit</span><strong>60%</strong></div>
+        </section>
+        <section class="card activity-card" aria-labelledby="activity-title">
+          <div class="card-heading"><div><div class="eyebrow">UNDER THE HOOD</div><h2 id="activity-title">Conversation & execution.</h2></div><button id="clear-log" class="text-button">Clear</button></div>
+          <div id="activity" class="activity" role="log" aria-live="polite"><div class="empty-log"><span>◇</span><p>Every local action leaves a trace.</p><small>Voice requests and manual controls appear here.</small></div></div>
+        </section>
+      </div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <footer><span>AURA / VEHICLE VOICE AGENT SAMPLE</span><span>Cloud intelligence. Local authority.</span><span>SIMULATION — NOT FOR DRIVING</span></footer>
+    </main>
+  </div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
