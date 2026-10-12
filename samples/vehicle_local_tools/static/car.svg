@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="85 85 885 385" role="img" aria-labelledby="title desc">
+  <title id="title">AURA One electric sedan</title>
+  <desc id="desc">Original illustration of a pearl silver electric sedan in front three-quarter view, with dark panoramic glass, machined alloy wheels, and illuminated LED headlights.</desc>
+  <defs>
+    <linearGradient id="side" x1=".1" y1="0" x2=".25" y2="1">
+      <stop stop-color="#f4f8fb"/><stop offset=".18" stop-color="#d6e0e7"/>
+      <stop offset=".38" stop-color="#a0b2c0"/><stop offset=".51" stop-color="#8499aa"/>
+      <stop offset=".59" stop-color="#b4c5d1"/><stop offset=".78" stop-color="#8ea4b5"/>
+      <stop offset=".93" stop-color="#455e73"/><stop offset="1" stop-color="#c1d0db"/>
+    </linearGradient>
+    <linearGradient id="bonnet" x1=".1" y1="0" x2=".7" y2="1">
+      <stop stop-color="#f3f7fa"/><stop offset=".25" stop-color="#e2eaf0"/>
+      <stop offset=".6" stop-color="#b3c4d1"/><stop offset="1" stop-color="#718c9f"/>
+    </linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2=".2" y2="1">
+      <stop stop-color="#c7d7e2"/><stop offset=".24" stop-color="#afc4d4"/>
+      <stop offset=".5" stop-color="#688598"/><stop offset=".74" stop-color="#9fb8c9"/>
+      <stop offset="1" stop-color="#3f5c70"/>
+    </linearGradient>
+    <linearGradient id="roof" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f4f8fb"/><stop offset=".5" stop-color="#c8d7e3"/><stop offset="1" stop-color="#6b889f"/>
+    </linearGradient>
+    <linearGradient id="window" x1=".2" y1="0" x2=".8" y2="1">
+      <stop stop-color="#79909e"/><stop offset=".14" stop-color="#354e60"/>
+      <stop offset=".48" stop-color="#172f42"/><stop offset=".75" stop-color="#0b1c2b"/>
+      <stop offset="1" stop-color="#405b6f"/>
+    </linearGradient>
+    <linearGradient id="windshield" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#67818e"/><stop offset=".3" stop-color="#253e4d"/>
+      <stop offset=".65" stop-color="#152c3a"/><stop offset="1" stop-color="#526b7b"/>
+    </linearGradient>
+    <linearGradient id="glassSheen" x1="0" y1="0" x2=".7" y2="1">
+      <stop stop-color="#d4e9f5" stop-opacity=".4"/><stop offset=".4" stop-color="#c8e2f0" stop-opacity=".02"/><stop offset="1" stop-color="#72a3bc" stop-opacity=".17"/>
+    </linearGradient>
+    <radialGradient id="tire"><stop offset=".55" stop-color="#101820"/><stop offset=".8" stop-color="#1d2731"/><stop offset=".93" stop-color="#070c12"/><stop offset="1" stop-color="#30404d"/></radialGradient>
+    <radialGradient id="alloy"><stop stop-color="#c9d8e0"/><stop offset=".45" stop-color="#768b9a"/><stop offset=".77" stop-color="#bfcbd4"/><stop offset=".89" stop-color="#e3ecf3"/><stop offset=".95" stop-color="#617786"/><stop offset="1" stop-color="#354857"/></radialGradient>
+    <linearGradient id="spoke"><stop stop-color="#f5f9fc"/><stop offset=".35" stop-color="#afc4d3"/><stop offset=".56" stop-color="#e5f0f7"/><stop offset="1" stop-color="#4d6578"/></linearGradient>
+    <linearGradient id="lower"><stop stop-color="#07121b"/><stop offset=".5" stop-color="#243a4a"/><stop offset="1" stop-color="#07121c"/></linearGradient>
+    <filter id="floorBlur"><feGaussianBlur stdDeviation="12"/></filter>
+    <filter id="lightGlow" x="-.3" y="-1" width="1.6" height="3"><feGaussianBlur stdDeviation="3"/></filter>
+    <g id="wheel">
+      <circle r="61" fill="url(#tire)"/>
+      <circle r="55" fill="none" stroke="#4b5b67" stroke-width=".8" opacity=".6"/>
+      <circle r="49" fill="url(#alloy)"/>
+      <circle r="42" fill="#132431"/>
+      <circle r="33" fill="#5a6d79"/>
+      <circle r="30" fill="none" stroke="#8798a5" stroke-width=".8"/>
+      <path d="M27-19 37-12 33 14 25 13Z" fill="#85b5b4"/>
+      <g fill="url(#spoke)" stroke="#d4e2eb" stroke-width=".45">
+        <path id="spokeShape" d="M-5-9-13-45-5-48 3-20 12-44 21-40 8-8 3 3Z"/>
+        <use href="#spokeShape" transform="rotate(72)"/>
+        <use href="#spokeShape" transform="rotate(144)"/>
+        <use href="#spokeShape" transform="rotate(216)"/>
+        <use href="#spokeShape" transform="rotate(288)"/>
+      </g>
+      <circle r="10" fill="#607989" stroke="#c4d8e5" stroke-width="1"/>
+      <path d="M-4 4 0-5 4 4M-2 1H2" fill="none" stroke="#d3e7f0" stroke-width="1.2"/>
+      <g fill="#d9e4eb"><circle cx="0" cy="-14" r="1.4"/><circle cx="13" cy="-4" r="1.4"/><circle cx="8" cy="11" r="1.4"/><circle cx="-8" cy="11" r="1.4"/><circle cx="-13" cy="-4" r="1.4"/></g>
+    </g>
+  </defs>
+  <!-- Ground contact and distant-side tires establish depth before the body. -->
+  <ellipse cx="541" cy="431" rx="398" ry="28" fill="#01060b" opacity=".85" filter="url(#floorBlur)"/>
+  <ellipse cx="883" cy="364" rx="33" ry="58" fill="#071018" transform="rotate(6 883 364)"/>
+  <ellipse cx="200" cy="337" rx="24" ry="44" fill="#071018"/>
+  <path d="M131 291 Q145 269 193 248L293 234 359 172Q401 130 486 123L596 132Q643 140 703 211L867 255Q918 268 933 305L927 353Q919 375 884 386L782 412 684 422 227 380 156 359Q130 344 129 322Z" fill="url(#side)" stroke="#849bab" stroke-width="1"/>
+  <!-- Roof and glasshouse: the far windshield is broader than the side windows. -->
+  <path d="M290 237 357 173Q402 130 487 123L596 132Q639 141 703 211L539 226Z" fill="url(#roof)"/>
+  <path d="M314 232 376 175Q414 145 481 140L532 149 549 215Z" fill="url(#window)" stroke="#c0d2dd" stroke-width="2"/>
+  <path d="M537 150 584 151Q624 170 676 213L558 218Z" fill="url(#windshield)" stroke="#9db4c5" stroke-width="2"/>
+  <path d="M537 150 584 151Q624 170 676 213L558 218Z" fill="url(#glassSheen)"/>
+  <path d="M392 166 429 149 441 221 425 224Z" fill="#0b1b29"/>
+  <path d="M482 140 492 141 514 219 503 222Z" fill="#0b1b29"/>
+  <path d="M331 224 372 185 395 170 405 223Z" fill="#2b4254" opacity=".65"/>
+  <path d="M321 232 414 149Q448 135 487 133L578 144" fill="none" stroke="#f4f9fc" stroke-width="2" opacity=".65"/>
+  <path d="M319 236 549 221" fill="none" stroke="#e3ecf2" stroke-width="2.5"/>
+  <path d="M548 151 567 211 642 210" fill="none" stroke="#9cb6c5" opacity=".3"/>
+  <path d="M559 214 655 210" stroke="#0a1927" stroke-width="3"/>
+  <path d="M650 209 619 176" stroke="#8c9ca7" stroke-width="1.3" opacity=".5"/>
+  <!-- Long bonnet, shoulder crease, and near-side doors. -->
+  <path d="M550 224 701 211 869 257 907 286 743 319 628 269Z" fill="url(#bonnet)"/>
+  <path d="M570 224 704 219 855 259 742 294Z" fill="#e8f1f7" opacity=".25"/>
+  <path d="M628 230 820 275M696 219 875 261" fill="none" stroke="#859cab" stroke-width="1.5"/>
+  <path d="M633 231 815 274M694 219 873 261" stroke="#f2f8fc" stroke-width=".8" opacity=".85"/>
+  <path d="M147 287 297 254 553 237 680 280 745 320" fill="none" stroke="#f5faff" stroke-width="2" opacity=".8"/>
+  <path d="M151 297 299 265 552 249 664 289" fill="none" stroke="#6b8496" stroke-width="1.2" opacity=".8"/>
+  <path d="M144 321 240 298 553 287 646 319 736 351 924 318" fill="none" stroke="#bfdae8" stroke-width=".8" opacity=".48"/>
+  <path d="M338 251 336 341Q337 354 350 359L465 373Q479 375 481 362L483 245" fill="none" stroke="#587386" stroke-width="1"/>
+  <path d="M486 246 519 254 623 282 618 383Q616 395 602 393L492 381Q482 379 481 365" fill="none" stroke="#536d80" stroke-width="1"/>
+  <path d="M341 348 474 366M489 370 611 384" fill="none" stroke="#d5e7f1" stroke-width="1" opacity=".52"/>
+  <path d="M169 345 243 355 315 366 616 405 672 414 782 402" fill="none" stroke="#243f54" stroke-width="7"/>
+  <path d="M178 353 634 411" stroke="#a7c5d9" stroke-width="1.2" opacity=".65"/>
+  <path d="M380 271 407 269Q410 269 410 272L410 275 380 277Z" fill="#516c80" stroke="#cbdce7" stroke-width=".8"/>
+  <path d="M525 280 551 284 551 289 525 285Z" fill="#496579" stroke="#d4e3ed" stroke-width=".8"/>
+  <!-- Wheel wells interrupt the body silhouette rather than sitting on top of it. -->
+  <path d="M210 375 210 337Q214 280 258 283 307 287 312 348L313 388Z" fill="#10202d"/>
+  <path d="M634 418 633 367Q635 294 690 306 744 318 754 386L756 418Z" fill="#0c1c29"/>
+  <path d="M210 338Q214 280 258 283 307 287 312 348" fill="none" stroke="#d2e1eb" stroke-width="3"/>
+  <path d="M634 367Q635 294 690 306 744 318 754 386" fill="none" stroke="#d8e5ee" stroke-width="3"/>
+  <path d="M640 364Q645 308 687 313 730 319 745 375" fill="none" stroke="#4c697f" stroke-width="1.4"/>
+  <g transform="translate(260 342) rotate(-5) scale(.67 .91)"><use href="#wheel"/></g>
+  <g transform="translate(693 380) rotate(-8) scale(.91 1.06)"><use href="#wheel"/></g>
+  <!-- Front fascia: closed EV grille, narrow optics, dark corner intake. -->
+  <path d="M744 319 906 285 933 306 927 352Q919 375 884 386L782 412 755 398 751 355Z" fill="url(#front)" stroke="#7895aa" stroke-width="1"/>
+  <path d="M771 365 912 333 909 353 788 391 764 385Z" fill="url(#lower)" stroke="#5c7e94" stroke-width=".8"/>
+  <path d="M786 374 902 344" fill="none" stroke="#1b3447" stroke-width="3"/>
+  <path d="M783 383 900 352" fill="none" stroke="#7992a3" stroke-width=".8" opacity=".6"/>
+  <path d="M768 396 885 366 903 356 896 375 785 409Z" fill="#182c3b"/>
+  <path d="M788 408 891 379" fill="none" stroke="#bfd7e4" stroke-width="1.7" opacity=".6"/>
+  <path d="M902 309 925 307 923 330 908 344 902 338Z" fill="#132d3e"/>
+  <path d="M910 313 918 312 916 329 911 333" fill="none" stroke="#597f99" stroke-width="1"/>
+  <path d="M737 315 796 303 801 317 749 330 728 321Z" fill="#102638" stroke="#7595ad" stroke-width="1"/>
+  <path d="M858 291 903 281 915 293 863 306Z" fill="#173548" stroke="#839fb2" stroke-width="1"/>
+  <path d="M740 316 789 307 792 310 748 322M866 296 904 287" fill="none" stroke="#90e5ff" stroke-width="7" filter="url(#lightGlow)" opacity=".75"/>
+  <path d="M738 315 790 305 791 309 746 319 740 319M865 296 905 286 908 288" fill="none" stroke="#e6fbff" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M798 309 855 297" fill="none" stroke="#c3dfe8" stroke-width="1" opacity=".55"/>
+  <path d="M829 328 832 321 836 326M831 325 834 325" fill="none" stroke="#dcecf3" stroke-width="1.5"/>
+  <path d="M155 278 166 275 178 290 160 295Z" fill="#671d27"/>
+  <path d="M156 280 160 290" stroke="#ff8985" stroke-width="2"/>
+  <!-- Mirror and subtle reflected studio light. -->
+  <path d="M558 240 576 253 570 263 548 255Z" fill="#263e51"/>
+  <path d="M552 244 537 234Q533 230 538 226L560 224 581 234 578 248Z" fill="url(#roof)" stroke="#718ea4"/>
+  <path d="M540 228 560 228 578 237" fill="none" stroke="#f4fbff" stroke-width="1"/>
+  <path d="M551 245 575 246" stroke="#b6d6e6" stroke-width="1.2"/>
+  <path d="M359 254 350 328 449 336 463 251Z" fill="#eff7fc" opacity=".035"/>
+  <path d="M496 254 503 346 606 368 610 280Z" fill="#e7f5fc" opacity=".035"/>
+</svg>
