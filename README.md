@@ -166,7 +166,6 @@ lifecycle. Do not run a second manual portal after this quickstart.
 | --- | --- | --- |
 | Run the general Voice Agent UI | [`portal/README.md`](portal/README.md) | Agent editor, YAML version editing, Templates, voice playground, and standalone WebRTC page |
 | Run Python or .NET samples | [`samples/README.md`](samples/README.md) | Common Python setup, microphone samples, REST lifecycle, IQ, Toolbox, local functions, downloads, and the C# sample |
-| Test speech components under load | [`speech_test/README.md`](speech_test/README.md) | Isolated STT/TTS test area; starts with Central India `en-IN-DiyaTurboNeural` TTS and a 4-to-50-thread load ramp |
 | Migrate Voice Live to Voice Agent | [`samples/voice_live_to_voice_agent/README.md`](samples/voice_live_to_voice_agent/README.md) | Two Python files with identical STT, GPT-4.1 mini, TTS, and audio settings; move from session configuration to a reusable agent |
 | Run realtime speech transcription | [`samples/realtime_stt/README.md`](samples/realtime_stt/README.md) | MAI Transcribe 2 or Azure Speech with VAD, microphone or WAV input, disabled LLM responses, and reported session usage |
 | Run Data Zone and regional realtime voice agents | [`samples/realtime_datazone_voice_agent.md`](samples/realtime_datazone_voice_agent.md) | East US 2 `gpt-realtime-2.1-datazone` with US inference, Japan East `azure-realtime` with confirmed GPU routing, and eligible Central India `gpt-realtime`; model-specific voices and microphone setup |
