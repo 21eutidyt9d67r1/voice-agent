@@ -25,7 +25,7 @@ Use underscores between words in sample directory names, including subagent exam
 
 | Sample | Lifecycle |
 | --- | --- |
-| [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare two Python files using the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local function-call handling, before and after saving settings as a reusable Voice Agent. |
+| [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local functions before and after migration. Includes dynamic session context and mid-session instruction-update examples. |
 | [Vehicle voice agent with local tools](vehicle_local_tools/README.md) | Web cockpit with cloud voice interaction and locally executed simulated climate, media, and navigation functions. Includes an offline dashboard, local policy enforcement, and a tool execution log. |
 | [Language learning with pronunciation assessment](language_learning/README.md) | Have a hands-free conversation with a voice coach that asks you to read specified sentences, then gives per-sentence and word-level feedback through an Azure Speech Pronunciation Assessment function tool. Supports spoken retries and a WAV-file mode. |
 | [Realtime STT agent](realtime_stt/README.md) | Create or reuse a voice-first agent with VAD, disabled LLM responses, MAI Transcribe 2 or Azure Speech, microphone or paced WAV input, and final usage collection with explicit completeness status. |
