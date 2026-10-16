@@ -25,6 +25,7 @@ Use underscores between words in sample directory names, including subagent exam
 
 | Sample | Lifecycle |
 | --- | --- |
+| [Add voice to an existing customer agent](existing_agent_voice_design/README.md) | Design guide: use a Hosted Agent as the Foundry Voice Agent conversation engine to connect managed voice to an existing customer agent or API endpoint. Includes a high-level architecture diagram; not a runnable sample. |
 | [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local functions before and after migration. Includes dynamic session context and mid-session instruction-update examples. |
 | [Vehicle voice agent with local tools](vehicle_local_tools/README.md) | Web cockpit with cloud voice interaction and locally executed simulated climate, media, and navigation functions. Includes an offline dashboard, local policy enforcement, and a tool execution log. |
 | [Language learning with pronunciation assessment](language_learning/README.md) | Have a hands-free conversation with a voice coach that asks you to read specified sentences, then gives per-sentence and word-level feedback through an Azure Speech Pronunciation Assessment function tool. Supports spoken retries and a WAV-file mode. |
