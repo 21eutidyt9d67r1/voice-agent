@@ -4,6 +4,7 @@ import asyncio
 import base64
 import copy
 import io
+import json
 import sys
 import threading
 import unittest
@@ -12,8 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from azure.ai.projects.models import VoiceAgentDefinition
-from azure.ai.voicelive.models import ServerEventSessionUpdated
+from azure.ai.projects.models import RealtimeServerEventResponseDone, VoiceAgentDefinition
+from azure.ai.voicelive.models import ServerEventResponseDone, ServerEventSessionUpdated
 
 sys.path.insert(0, str(
     Path(__file__).resolve().parents[1] / "samples" / "voice_live_to_voice_agent"
@@ -111,6 +112,148 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(direct["voice"]["name"], "en-US-Ava:DragonHDLatestNeural")
         self.assertTrue(direct["turn_detection"]["interrupt_response"])
         self.assertTrue(direct["turn_detection"]["create_response"])
+        self.assertEqual(direct["tools"], saved["tools"])
+        self.assertEqual(direct["tools"], common.TOOLS)
+        self.assertEqual(direct["tool_choice"], saved["tool_choice"])
+        self.assertEqual(direct["tool_choice"], "auto")
+
+    def test_local_function_validates_arguments(self):
+        self.assertEqual(common.execute_function("add_numbers", '{"a":2,"b":3}'), {"sum": 5})
+        self.assertEqual(common.execute_function("add_numbers", '{"a":-2.5,"b":3}'), {"sum": 0.5})
+        for arguments in (
+            "", "null", "[]", '{"a":2}', '{"a":2,"b":3,"extra":4}',
+            '{"a":true,"b":3}', '{"a":"2","b":3}', '{"a":NaN,"b":3}',
+            '{"a":Infinity,"b":3}', '{"a":1e308,"b":1e308}',
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                common.execute_function("add_numbers", arguments)
+        with self.assertRaisesRegex(ValueError, "Unsupported local function"):
+            common.execute_function("delete_files", "{}")
+
+    async def test_both_sdks_use_identical_local_function_flow(self):
+        event_data = {"type": "response.done", "response": {
+            "id": "response1", "status": "completed", "output": [
+                {"type": "function_call", "id": "item1", "call_id": "call1",
+                 "name": "add_numbers", "arguments": '{"a":2,"b":3}'},
+                {"type": "function_call", "id": "item2", "call_id": "call2",
+                 "name": "add_numbers", "arguments": '{"a":-1,"b":4}'},
+            ],
+        }}
+        for event_type in (ServerEventResponseDone, RealtimeServerEventResponseDone):
+            with self.subTest(sdk=event_type.__name__):
+                sequence = []
+
+                async def send(event):
+                    self.assertEqual(event["type"], "conversation.item.create")
+                    sequence.append(("output", dict(event["item"])))
+
+                async def create_response():
+                    sequence.append(("response",))
+
+                connection = SimpleNamespace(
+                    send=AsyncMock(side_effect=send),
+                    response=SimpleNamespace(create=AsyncMock(side_effect=create_response)),
+                )
+                calls = set()
+                event = event_type(copy.deepcopy(event_data))
+                with redirect_stdout(io.StringIO()):
+                    await common.handle_functions(event, connection, calls)
+                    await common.handle_functions(event, connection, calls)
+                self.assertEqual([entry[0] for entry in sequence], ["output", "output", "response"])
+                self.assertEqual([entry[1]["call_id"] for entry in sequence[:-1]], ["call1", "call2"])
+                self.assertEqual([json.loads(entry[1]["output"]) for entry in sequence[:-1]],
+                                 [{"sum": 5}, {"sum": 3}])
+                self.assertTrue(all(entry[1]["type"] == "function_call_output" for entry in sequence[:-1]))
+                connection.response.create.assert_awaited_once_with()
+
+    async def test_functions_wait_for_completed_response(self):
+        connection = MagicMock()
+        connection.send = AsyncMock()
+        connection.response.create = AsyncMock()
+        for event in (
+            {"type": "response.function_call_arguments.done", "name": "add_numbers",
+             "call_id": "call1", "arguments": '{"a":2,"b":3}'},
+            {"type": "response.done", "response": {"status": "cancelled", "output": [
+                {"type": "function_call", "call_id": "call1", "name": "add_numbers",
+                 "arguments": '{"a":2,"b":3}'},
+            ]}},
+            {"type": "response.done", "response": {"status": "completed", "output": [
+                {"type": "message", "role": "assistant", "content": []},
+            ]}},
+        ):
+            await common.handle_functions(event, connection, set())
+        connection.send.assert_not_awaited()
+        connection.response.create.assert_not_awaited()
+
+    async def test_invalid_tool_call_and_submission_failure_surface(self):
+        connection = MagicMock()
+        connection.send = AsyncMock()
+        connection.response.create = AsyncMock()
+        for call in (
+            {"type": "function_call", "name": "add_numbers", "arguments": '{"a":2,"b":3}'},
+            {"type": "function_call", "call_id": "call1", "name": "unknown", "arguments": "{}"},
+            {"type": "function_call", "call_id": "call1", "name": "add_numbers", "arguments": {}},
+        ):
+            with self.subTest(call=call), self.assertRaises(ValueError):
+                await common.handle_functions({"type": "response.done", "response": {
+                    "status": "completed", "output": [call],
+                }}, connection, set())
+        connection.response.create.assert_not_awaited()
+        connection.send.side_effect = ConnectionResetError("lost transport")
+        with redirect_stdout(io.StringIO()), self.assertRaises(ConnectionResetError):
+            await common.handle_functions({"type": "response.done", "response": {
+                "status": "completed", "output": [{
+                    "type": "function_call", "call_id": "call1", "name": "add_numbers",
+                    "arguments": '{"a":2,"b":3}',
+                }],
+            }}, connection, set())
+        connection.response.create.assert_not_awaited()
+
+    async def test_conversation_loop_executes_tool_and_keeps_receiving(self):
+        events = iter([
+            {"type": "session.updated"},
+            {"type": "response.done", "response": {"status": "completed", "output": [{
+                "type": "function_call", "call_id": "call1", "name": "add_numbers",
+                "arguments": '{"a":12.5,"b":7.5}',
+            }]}},
+            {"type": "response.output_audio_transcript.done", "transcript": "The sum is 20."},
+        ])
+        audio = MagicMock()
+
+        async def frames(stop):
+            yield b"\0\0"
+            await stop.wait()
+
+        audio.frames = frames
+        context = MagicMock()
+        context.__enter__.return_value = audio
+        connection = SimpleNamespace(
+            input_audio_buffer=SimpleNamespace(append=AsyncMock()),
+            send=AsyncMock(),
+            response=SimpleNamespace(create=AsyncMock()),
+        )
+
+        async def recv():
+            try:
+                return next(events)
+            except StopIteration:
+                connection.response.create.assert_awaited_once_with()
+                raise ConnectionResetError("test finished")
+
+        connection.recv = recv
+        printed = io.StringIO()
+        with (
+            patch.object(common, "Audio", return_value=context),
+            redirect_stdout(printed),
+            self.assertRaisesRegex(ConnectionResetError, "test finished"),
+        ):
+            await common.talk(connection)
+        output = connection.send.call_args.args[0]["item"]
+        self.assertEqual(output["call_id"], "call1")
+        self.assertEqual(json.loads(output["output"]), {"sum": 20.0})
+        self.assertIn("Local function: add_numbers", printed.getvalue())
+        self.assertIn("Assistant: The sum is 20.", printed.getvalue())
+        context.__exit__.assert_called_once()
 
     def test_builders_do_not_mutate_shared_settings(self):
         direct = live.build_session().as_dict()
@@ -152,7 +295,15 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
         }
         saved["audio"]["output"].pop("voice_type")
         saved["audio"]["input"]["turn_detection"]["remove_filler_words"] = False
+        saved["tools"][0]["response_scheduling"] = "when_idle"
         common.validate_definition(VoiceAgentDefinition(saved), agent.build_definition())
+
+    def test_readback_rejects_changed_tool_schema(self):
+        for key, value in (("name", "other"), ("parameters", {})):
+            saved = agent.build_definition().as_dict()
+            saved["tools"][0][key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "Stored setting differs"):
+                common.validate_definition(saved, agent.build_definition())
 
     async def test_direct_connect_configures_session(self):
         connection = SimpleNamespace(session=SimpleNamespace(update=AsyncMock()))

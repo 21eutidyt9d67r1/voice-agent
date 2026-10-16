@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from migration_common import (
     INSTRUCTIONS, MODALITIES, MODEL, NOISE_REDUCTION, RATE,
-    TRANSCRIPTION, TURN_DETECTION, VOICE, talk,
+    TOOLS, TRANSCRIPTION, TURN_DETECTION, VOICE, talk,
 )
 
 
@@ -31,6 +31,8 @@ def build_session() -> RequestSession:
         "input_audio_noise_reduction": NOISE_REDUCTION,
         "turn_detection": TURN_DETECTION,
         "voice": VOICE,
+        "tools": TOOLS,
+        "tool_choice": "auto",
     }))
 
 

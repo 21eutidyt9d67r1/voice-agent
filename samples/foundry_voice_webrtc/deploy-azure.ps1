@@ -74,6 +74,9 @@ try {
         "azureApiVersion=$($settings['AZURE_API_VERSION'])",
         "foundryFeatures=$($settings['FOUNDRY_FEATURES'])"
     )
+    if ($settings.ContainsKey("ICE_SERVERS_JSON")) {
+        $commonParameters += "iceServersJson=$($settings['ICE_SERVERS_JSON'])"
+    }
 
     Invoke-AzureCli deployment sub create `
         --name $deploymentName `

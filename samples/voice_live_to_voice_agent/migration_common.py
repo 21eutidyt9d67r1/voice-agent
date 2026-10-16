@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import math
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,7 +19,20 @@ MODEL = "gpt-4.1-mini"
 INSTRUCTIONS = (
     "You are a friendly voice assistant. Speak English and keep replies short. "
     "Ask one question at a time. Do not use Markdown or read formatting aloud."
+    " Always use add_numbers when asked to add two numbers. "
+    "After the function result arrives, briefly state the sum."
 )
+TOOLS = [{
+    "type": "function",
+    "name": "add_numbers",
+    "description": "Add two numbers using a function executed locally by this client.",
+    "parameters": {
+        "type": "object",
+        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+        "required": ["a", "b"],
+        "additionalProperties": False,
+    },
+}]
 TRANSCRIPTION = {"model": "azure-speech", "language": "en-US"}
 VOICE = {"type": "azure-standard", "name": "en-US-Ava:DragonHDLatestNeural"}
 MODALITIES = ["text", "audio"]
@@ -36,10 +51,77 @@ class AudioBuffer(Protocol):
     async def append(self, *, audio: str) -> None: ...
 
 
+class Responses(Protocol):
+    async def create(self) -> None: ...
+
+
 class Connection(Protocol):
     input_audio_buffer: AudioBuffer
+    response: Responses
 
     async def recv(self) -> Mapping[str, Any]: ...
+    async def send(self, event: Mapping[str, Any]) -> None: ...
+
+
+def execute_function(name: str, arguments: str) -> dict[str, float]:
+    """Dispatch only the sample's allowlisted local function."""
+    if name != "add_numbers":
+        raise ValueError(f"Unsupported local function: {name!r}")
+    values = json.loads(arguments)
+    if not isinstance(values, dict) or set(values) != {"a", "b"}:
+        raise ValueError("add_numbers requires exactly a and b.")
+    for value in values.values():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("add_numbers arguments must be finite numbers.")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError as error:
+            raise ValueError("add_numbers arguments must be finite numbers.") from error
+        if not finite:
+            raise ValueError("add_numbers arguments must be finite numbers.")
+    total = values["a"] + values["b"]
+    try:
+        finite = math.isfinite(total)
+    except OverflowError as error:
+        raise ValueError("add_numbers result must be finite.") from error
+    if not finite:
+        raise ValueError("add_numbers result must be finite.")
+    return {"sum": total}
+
+
+async def handle_functions(
+    event: Mapping[str, Any], connection: Connection, completed_calls: set[str],
+) -> None:
+    """Both SDKs expose complete function arguments in response.done.output."""
+    if event.get("type") != "response.done":
+        return
+    response = event.get("response") or {}
+    if response.get("status") != "completed":
+        return
+    outputs = []
+    for item in response.get("output") or []:
+        if item.get("type") != "function_call":
+            continue
+        call_id = item.get("call_id")
+        if not isinstance(call_id, str) or not call_id:
+            raise ValueError("Local function call is missing call_id.")
+        if call_id in completed_calls:
+            continue
+        name, arguments = item.get("name"), item.get("arguments")
+        if not isinstance(name, str) or not isinstance(arguments, str):
+            raise ValueError("Local function call must contain a name and JSON arguments.")
+        result = execute_function(name, arguments)
+        print(f"Local function: {name}({arguments}) -> {json.dumps(result, allow_nan=False)}")
+        outputs.append({
+            "type": "function_call_output", "call_id": call_id,
+            "output": json.dumps(result, allow_nan=False),
+        })
+        completed_calls.add(call_id)
+    if outputs:
+        # Wait for response.done, then submit all results before one continuation.
+        for output in outputs:
+            await connection.send({"type": "conversation.item.create", "item": output})
+        await connection.response.create()
 
 
 def validate_definition(actual: Any, expected: Any) -> None:
@@ -50,6 +132,11 @@ def validate_definition(actual: Any, expected: Any) -> None:
                 raise ValueError(f"Stored setting differs at {path}: {stored!r}")
             for key, value in requested.items():
                 check(stored.get(key), value, f"{path}.{key}")
+        elif isinstance(requested, list):
+            if not isinstance(stored, list) or len(stored) != len(requested):
+                raise ValueError(f"Stored setting differs at {path}: {stored!r}")
+            for index, (actual_item, expected_item) in enumerate(zip(stored, requested)):
+                check(actual_item, expected_item, f"{path}[{index}]")
         elif stored != requested:
             raise ValueError(
                 f"Stored setting differs at {path}: expected {requested!r}, got {stored!r}"
@@ -100,8 +187,11 @@ async def talk(connection: Connection) -> None:
                 )
 
         async def receive() -> None:
+            completed_calls: set[str] = set()
             while True:
-                handle_event(await connection.recv(), audio)
+                event = await connection.recv()
+                handle_event(event, audio)
+                await handle_functions(event, connection, completed_calls)
 
         tasks = [asyncio.create_task(send()), asyncio.create_task(receive())]
         try:

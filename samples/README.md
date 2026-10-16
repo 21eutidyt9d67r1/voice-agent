@@ -26,7 +26,8 @@ Use underscores between words in sample directory names, including subagent exam
 | Sample | Lifecycle |
 | --- | --- |
 | [Add voice to an existing customer agent](existing_agent_voice_design/README.md) | Design guide: use a Hosted Agent as the Foundry Voice Agent conversation engine to connect managed voice to an existing customer agent or API endpoint. Includes a high-level architecture diagram; not a runnable sample. |
-| [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare two Python files using the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade, before and after saving settings as a reusable Voice Agent. |
+| [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local functions before and after migration. Includes dynamic session context and mid-session instruction-update examples. |
+| [Vehicle voice agent with local tools](vehicle_local_tools/README.md) | Web cockpit with cloud voice interaction and locally executed simulated climate, media, and navigation functions. Includes an offline dashboard, local policy enforcement, and a tool execution log. |
 | [Language learning with pronunciation assessment](language_learning/README.md) | Have a hands-free conversation with a voice coach that asks you to read specified sentences, then gives per-sentence and word-level feedback through an Azure Speech Pronunciation Assessment function tool. Supports spoken retries and a WAV-file mode. |
 | [Realtime STT agent](realtime_stt/README.md) | Create or reuse a voice-first agent with VAD, disabled LLM responses, MAI Transcribe 2 or Azure Speech, microphone or paced WAV input, and final usage collection with explicit completeness status. |
 | [Agent-based transcript refinement, summary, and translation](audio_transcribe_and_translate/README.md) | Transcribe a WAV recording with mai-transcribe-2 and process it with a gpt-5.4 Voice Agent. Includes refinement and translation modes, guidance for adapting the instructions to summarization, and a 60-second input limit. Supports native Windows PowerShell. |
@@ -39,13 +40,14 @@ Use underscores between words in sample directory names, including subagent exam
 | [`voice_agent_with_foundry_iq.py`](voice_agent_with_foundry_iq.py) | Create a Foundry IQ Agent, converse through the microphone, and display tool activity. |
 | [`voice_agent_with_local_function.py`](voice_agent_with_local_function.py) | Execute `add_numbers` in the client, return its output, and hear the response. |
 | [`voice_agent_with_toolbox.py`](voice_agent_with_toolbox.py) | Create a Toolbox Agent, converse through the microphone, and display tool activity. |
-| [Documentation-generated voice web sample](foundry_voice_webrtc/README.md) | Connect a browser to an existing voice Agent with WebSocket audio or experimental WebRTC; standalone Python backend, Azure CLI authentication, and Azure session storage enabled. |
+| [Documentation-generated voice web sample](foundry_voice_webrtc/README.md) | Connect a browser to an existing voice Agent with generally available WebSocket or WebRTC transports; standalone Python backend, Azure CLI authentication, and Azure session storage enabled. |
 | [Basic prompt subagent](subagent/voice_subagent_prompt_basic/README.md) | Create a poetry prompt subagent and a voice agent that delegates poem writing to it. |
 | [Hosted GitHub Copilot subagent](subagent/voice_subagent_hosted_agent/README.md) | Create a voice agent that delegates research, learning, and coding tasks to an existing hosted GitHub Copilot agent. |
 | [Finance with Handoff](example1_finance_with_handoff/README.md) | Publish Realtime and Cascade Luna variants of one shared Finance handoff graph and run text Voice WebSocket smoke tests. |
 | [Finance with OTP and Officer Search](example2_finance_with_OTP_and_Officer_Search/README.md) | Publish a flat Finance Agent for OTP verification and loan-officer search, then run a text smoke test. |
 | [Elevator Service with Safety, Zendesk, and Handoff](example3_elevator_service_with_safety_zendesk_and_handoff/README.md) | Publish an inbound field-service graph with deterministic safety checks, explicit Zendesk ticket confirmation, exact-ID status queries, and human-assistance routing. |
 | [C# voice agent sample](CSharp/README.md) | Create and manage a temporary Agent or use an existing Agent, stream audio over WebSocket, and read persisted conversations and recordings. |
+| [Java live audio Voice Agent sample](java/README.md) | Create a temporary Agent and run an asynchronous microphone and speaker conversation with Enter-to-end, barge-in, persisted conversation readback, and cleanup. |
 | [`download_conversation_artifacts.py`](download_conversation_artifacts.py) | Download conversation JSON, per-turn WAV files, and the merged stereo WAV. |
 | [`download_conversation_traces.py`](download_conversation_traces.py) | Download correlated Application Insights rows by conversation ID. |
 
@@ -67,7 +69,7 @@ For Central India, use the exact `gpt-realtime` model, not `gpt-realtime-2.1`
 does not list Agent support in Central India; confirm enablement before running
 this voice-first Agent sample.
 
-The Voice Live migration, Finance, Elevator, language-learning, and documentation-generated voice web
+The Voice Live migration, Finance, Elevator, language-learning, vehicle-local-tools, and documentation-generated voice web
 samples use their own `requirements.txt` files. The voice web sample uses a standalone HTTP/WebSocket
 backend and does not require the Projects SDK; follow its README for setup.
 The common Python SDK samples require `azure-ai-projects>=2.7.0` from PyPI.

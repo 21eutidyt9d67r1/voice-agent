@@ -20,7 +20,15 @@ Voice Agent is now available in **public preview**, making voice a first-class m
 
 [Voice Live](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live) is the foundation for real-time voice interaction, and Voice Agent builds on that foundation to deliver complete voice-first agents. Voice Live handles the real-time voice experience, while Voice Agent adds the intelligence, tools, knowledge, and orchestration required to build end-to-end agentic applications.
 
-For most customers building voice-first agents, we recommend starting with Voice Agent. Voice Agent provides the more complete, integrated experience for building and operating an agent, bringing together voice, reasoning, instructions, knowledge, tools, and orchestration. Voice Live is a better fit when customers already have their own agent stack and primarily need real-time voice capabilities with greater control over the voice application architecture.
+![Architecture comparison: Voice Live with a direct LLM versus a managed Voice Agent in Foundry, retaining the voice pipeline and tool-call flow while adding agent management capabilities.](assets/voice-live-to-voice-agent.png)
+
+**We recommend that customers using Voice Live with a direct LLM migrate to Voice Agent.** Voice Agent builds on Voice Live capabilities rather than replacing them: keep your real-time voice experience, speech recognition and synthesis, turn-taking, interruptions, and local function calls, while gaining a managed, named agent in Foundry.
+
+Migration is about gaining agent capabilities, not giving up Voice Live features. Voice Agent adds reusable, versioned configuration, built-in orchestration, Foundry tools and connectors, knowledge integration, conversation state management, observability, evaluation, and agent lifecycle management. Check model, voice, region, and access availability for your target Foundry Project before migrating; feature availability and configuration depend on the selected pipeline.
+
+Start with the [Voice Live to Voice Agent migration sample](samples/voice_live_to_voice_agent/README.md), which preserves the same speech pipeline, settings, and client-executed local function handler before and after migration.
+
+For new voice-first applications, start with Voice Agent. Direct Voice Live remains an option when you deliberately need to manage your own agent stack and low-level orchestration.
 
 ## Quick Links
 

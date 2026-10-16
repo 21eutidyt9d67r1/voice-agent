@@ -8,7 +8,7 @@
 <body>
   <header><a class="brand" href="/">◉ <span>first voice</span></a><span class="tag">AZURE FOUNDRY <span> / </span> LIVE VOICE</span></header>
   <main>
-    <section class="intro"><p class="eyebrow">YOUR FIRST VOICE AGENT</p><h1>A conversation.<br>Just a little more human.</h1><p>Speak naturally. Pause to hear a reply. Interrupt when you need to.</p></section>
+    <section class="intro"><p class="eyebrow">YOUR FIRST VOICE AGENT</p><h1>A conversation.<br>Just a little more human.</h1><p>Speak naturally or type a message. Pause to hear a reply. Interrupt when you need to.</p></section>
     <div class="workspace">
       <section class="call-panel" aria-labelledby="call-title">
         <div class="panel-top"><h2 id="call-title">Voice session</h2><span id="connection" class="badge">Offline</span></div>
@@ -19,13 +19,22 @@
         <button id="play" class="play" hidden>Enable speaker audio</button>
         <p id="error" class="error" role="alert" hidden></p>
         <div class="session-details"><div><span>AGENT</span><strong id="agent">Not configured</strong></div><div><span>MEDIA</span><strong id="media">WebSocket · PCM16 / 24 kHz</strong></div></div>
-        <p class="privacy">Microphone audio is sent to Azure during a call. Azure conversation/audio storage is enabled. Clearing this page does not delete Azure-stored data. This app does not save transcripts locally.</p>
+        <p class="privacy">Microphone audio and submitted text are sent to Azure during a call. Azure conversation/audio storage is enabled. Clearing this page does not delete Azure-stored data. This app does not save transcripts locally.</p>
       </section>
-      <section class="transcript-panel" aria-labelledby="transcript-title"><div class="panel-top"><h2 id="transcript-title">The conversation</h2><button id="clear" class="text-button">Clear</button></div><div id="transcript" role="log" aria-live="polite" aria-relevant="additions text"><div id="empty"><span>“</span><h3>Good conversations start with hello.</h3><p>Your words and the agent’s replies will appear here.</p></div></div><div class="transcript-footer"><span class="dot"></span> Live transcription <span id="elapsed">00:00</span></div></section>
+      <section class="transcript-panel" aria-labelledby="transcript-title">
+        <div class="panel-top"><h2 id="transcript-title">The conversation</h2><button id="clear" class="text-button">Clear</button></div>
+        <div id="transcript" role="log" aria-live="polite" aria-relevant="additions text"><div id="empty"><span>“</span><h3>Good conversations start with hello.</h3><p>Your words and the agent’s replies will appear here.</p></div></div>
+        <form id="text-form" class="text-composer">
+          <label for="text-input">Message your agent</label>
+          <div class="text-composer-controls"><input id="text-input" type="text" maxlength="4000" placeholder="Type a message..." aria-describedby="text-help" autocomplete="off" disabled><button id="send-text" type="submit" disabled>Send</button></div>
+          <p id="text-help">Start a conversation to send text. Press Enter or Send for a text-only reply; wait for the agent's response before sending another message. Mute the mic to use text only.</p>
+        </form>
+        <div class="transcript-footer"><span class="dot"></span> Live conversation <span id="elapsed">00:00</span></div>
+      </section>
     </div>
-    <details id="setup"><summary>Quick setup & connection notes</summary><ol><li>Create a <strong>Voice</strong> agent in your Foundry project using the <a href="https://learn.microsoft.com/en-us/azure/foundry/agents/quickstarts/prompt-voice-agent?pivots=portal" target="_blank" rel="noreferrer">Microsoft quickstart</a>. WebRTC requires additional transport availability.</li><li>Install Azure CLI, open a normal PowerShell window, and run <code>az login</code>. Use the tenant/subscription containing your project. Keep your project endpoint and agent name in <code>.env</code>. Agent Service requires <strong>Microsoft Entra ID, not a resource API key</strong>; no client secret is needed. Your signed-in account needs access to the Foundry project or agent.</li><li>For WebSocket, configure mono PCM16 audio at 24 kHz, server-side turn detection with automatic responses, and speech transcription in Foundry. Open this page on localhost, choose a connection, and allow the microphone.</li></ol><p>Bearer tokens stay on the backend. Run the server as the same Windows user who ran <code>az login</code>, with outbound network access. Check authentication and session startup with <code>python check_websocket.py</code>.</p></details>
+    <details id="setup"><summary>Quick setup & connection notes</summary><ol><li>Create a <strong>Voice</strong> agent in your Foundry project using the <a href="https://learn.microsoft.com/en-us/azure/foundry/agents/quickstarts/prompt-voice-agent?pivots=portal" target="_blank" rel="noreferrer">Microsoft quickstart</a>. WebSocket and WebRTC transports are generally available. WebRTC needs ICE connectivity; STUN/TURN may be needed.</li><li>Install Azure CLI, open a normal PowerShell window, and run <code>az login</code>. Use the tenant/subscription containing your project. Keep your project endpoint and agent name in <code>.env</code>. Agent Service requires <strong>Microsoft Entra ID, not a resource API key</strong>; no client secret is needed. Your signed-in account needs access to the Foundry project or agent.</li><li>For WebSocket, configure mono PCM16 audio at 24 kHz, server-side turn detection with automatic responses, and speech transcription in Foundry. Open this page on localhost, choose a connection, and allow the microphone.</li></ol><p>Bearer tokens stay on the backend. Run the server as the same Windows user who ran <code>az login</code>, with outbound network access. Check authentication and session startup with <code>python check_websocket.py</code>.</p></details>
   </main>
-  <footer>Built for the first hello.<span>Foundry voice agents · Preview</span></footer>
+  <footer>Built for the first hello.<span>Foundry voice agents · WebSocket / WebRTC</span></footer>
   <audio id="remote-audio" autoplay></audio>
 </body>
 </html>

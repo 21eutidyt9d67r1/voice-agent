@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from migration_common import (
     INSTRUCTIONS, MODALITIES, MODEL, NOISE_REDUCTION, RATE,
-    TRANSCRIPTION, TURN_DETECTION, VOICE, _validate_project_endpoint,
+    TOOLS, TRANSCRIPTION, TURN_DETECTION, VOICE, _validate_project_endpoint,
     talk, validate_definition,
 )
 
@@ -28,6 +28,8 @@ def build_definition() -> VoiceAgentDefinition:
         "model": MODEL,
         "instructions": INSTRUCTIONS,
         "output_modalities": MODALITIES,
+        "tools": TOOLS,
+        "tool_choice": "auto",
         "audio": {
             "input": {
                 "format": {"type": "audio/pcm", "rate": RATE},
