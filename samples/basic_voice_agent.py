@@ -40,8 +40,6 @@ from dotenv import load_dotenv
 from foundry_trace_url import build_foundry_trace_url
 
 
-load_dotenv()
-
 SAMPLE_RATE: Final = 24000
 CHUNK_SAMPLES: Final = 1200
 
@@ -360,6 +358,7 @@ def parse_agent_name() -> Optional[str]:
 
 
 if __name__ == "__main__":
+    load_dotenv()
     try:
         asyncio.run(lifecycle(parse_agent_name()))
     except KeyboardInterrupt:

@@ -13,7 +13,10 @@ from typing import Any, Protocol
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from migration_audio import Audio, RATE
-from voice_agent_sdk_common import _canonical_definition, _validate_project_endpoint
+import voice_agent_sdk_common
+from voice_agent_sdk_common import _validate_project_endpoint
+
+validate_definition = voice_agent_sdk_common.validate_definition
 
 MODEL = "gpt-4.1-mini"
 INSTRUCTIONS = (
@@ -122,27 +125,6 @@ async def handle_functions(
         for output in outputs:
             await connection.send({"type": "conversation.item.create", "item": output})
         await connection.response.create()
-
-
-def validate_definition(actual: Any, expected: Any) -> None:
-    """Check all requested settings, allowing service-added defaults."""
-    def check(stored: Any, requested: Any, path: str) -> None:
-        if isinstance(requested, dict):
-            if not isinstance(stored, dict):
-                raise ValueError(f"Stored setting differs at {path}: {stored!r}")
-            for key, value in requested.items():
-                check(stored.get(key), value, f"{path}.{key}")
-        elif isinstance(requested, list):
-            if not isinstance(stored, list) or len(stored) != len(requested):
-                raise ValueError(f"Stored setting differs at {path}: {stored!r}")
-            for index, (actual_item, expected_item) in enumerate(zip(stored, requested)):
-                check(actual_item, expected_item, f"{path}[{index}]")
-        elif stored != requested:
-            raise ValueError(
-                f"Stored setting differs at {path}: expected {requested!r}, got {stored!r}"
-            )
-
-    check(_canonical_definition(actual), _canonical_definition(expected), "definition")
 
 
 def handle_event(event: Mapping[str, Any], audio: Audio | None = None) -> None:
