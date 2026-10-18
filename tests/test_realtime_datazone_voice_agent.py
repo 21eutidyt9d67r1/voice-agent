@@ -76,19 +76,25 @@ class DatazoneSampleTests(unittest.IsolatedAsyncioTestCase):
                     sample.validate_definition(VoiceAgentDefinition(stored), "azure-realtime")
 
     def test_rejects_unknown_model(self):
-        with self.assertRaises(ValueError):
-            sample.build_definition("gpt-4.1")
+        for model in ("gpt-4.1", "gpt-realtime"):
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                sample.build_definition(model)
+            with self.subTest(model=model), self.assertRaises(ValueError):
+                sample.validate_definition(sample.build_definition(), model)
 
-    def test_central_india_gpt_realtime_definition(self):
-        definition = sample.build_definition("gpt-realtime")
-        sample.validate_definition(definition, "gpt-realtime")
+    def test_south_india_gpt_realtime_regional_definition(self):
+        definition = sample.build_definition("gpt-realtime-regional")
+        sample.validate_definition(definition, "gpt-realtime-regional")
         stored = definition.as_dict()
-        self.assertEqual(stored["model"], "gpt-realtime")
+        self.assertEqual(stored["model"], "gpt-realtime-regional")
         self.assertEqual(stored["model_type"], "managed")
         self.assertEqual(stored["audio"]["output"]["voice"], "en-IN-Diya:DragonHDLatestNeural")
         self.assertEqual(stored["audio"]["output"]["voice_type"], "azure-standard")
         with self.assertRaises(ValueError):
             sample.validate_definition(definition)
+        stored["model"] = "gpt-realtime"
+        with self.assertRaises(ValueError):
+            sample.validate_definition(VoiceAgentDefinition(stored), "gpt-realtime-regional")
 
     def test_rejects_incompatible_agents(self):
         for field, value in (
@@ -192,11 +198,11 @@ class DatazoneSampleTests(unittest.IsolatedAsyncioTestCase):
         client.agents.enable.assert_awaited_once()
         microphone.assert_not_awaited()
 
-    async def test_central_india_publication(self):
+    async def test_south_india_regional_publication(self):
         client = AsyncMock()
         client.__aenter__.return_value = client
         version = SimpleNamespace(
-            version="1", definition=sample.build_definition("gpt-realtime")
+            version="1", definition=sample.build_definition("gpt-realtime-regional")
         )
         client.agents.create_version.return_value = version
         client.agents.get_version.return_value = version
@@ -208,11 +214,11 @@ class DatazoneSampleTests(unittest.IsolatedAsyncioTestCase):
         ):
             await sample.run(
                 "https://india.services.ai.azure.com/api/projects/sample",
-                None, True, "gpt-realtime",
+                None, True, "gpt-realtime-regional",
             )
         published = client.agents.create_version.call_args.kwargs["definition"].as_dict()
-        self.assertEqual(published["model"], "gpt-realtime")
-        self.assertIn("Central India (centralindia)", output.getvalue())
+        self.assertEqual(published["model"], "gpt-realtime-regional")
+        self.assertIn("South India (southindia)", output.getvalue())
         client.agents.enable.assert_awaited_once()
         microphone.assert_not_awaited()
 

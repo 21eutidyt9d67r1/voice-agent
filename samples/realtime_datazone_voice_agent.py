@@ -1,4 +1,4 @@
-"""Talk to a voice-first GPT Realtime Data Zone or Azure Realtime agent."""
+"""Talk to a voice-first GPT Realtime Data Zone, regional, or Azure Realtime agent."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from voice_agent_sdk_common import _canonical_definition, _validate_project_endp
 
 
 MODEL = "gpt-realtime-2.1-datazone"
-MODELS = (MODEL, "azure-realtime", "gpt-realtime")
+MODELS = (MODEL, "azure-realtime", "gpt-realtime-regional")
 INSTRUCTIONS = (
     "You are a friendly voice-first assistant. Speak natural American English. "
     "Keep replies short, ask one question at a time, and let the caller interrupt. "
@@ -36,7 +36,7 @@ def build_definition(model: str = MODEL) -> VoiceAgentDefinition:
             "type": "azure-standard",
             "name": (
                 "en-IN-Diya:DragonHDLatestNeural"
-                if model == "gpt-realtime"
+                if model == "gpt-realtime-regional"
                 else "en-US-Ava:DragonHDLatestNeural"
             ),
         }
@@ -117,9 +117,9 @@ async def run(
     if model == "azure-realtime":
         print("Azure Realtime sample target region: Japan East (japaneast).")
         print("Use a Japan East Foundry Project; the endpoint URL alone does not verify its region.")
-    elif model == "gpt-realtime":
-        print("GPT Realtime sample target region: Central India (centralindia).")
-        print("Use an eligible Central India Foundry Project; the endpoint URL alone does not verify its region.")
+    elif model == "gpt-realtime-regional":
+        print("GPT Realtime Regional sample target region: South India (southindia).")
+        print("Use an eligible South India Foundry Project; the endpoint URL alone does not verify its region.")
     async with DefaultAzureCredential() as credential, AIProjectClient(
         endpoint=endpoint, credential=credential, allow_preview=True
     ) as client:
@@ -159,7 +159,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--endpoint", default=os.getenv("AZURE_VOICE_AGENTS_ENDPOINT"),
-        help="Eligible Project: US for Data Zone, Japan East for Azure Realtime, Central India for GPT Realtime.",
+        help="Eligible Project: US for Data Zone, Japan East for Azure Realtime, South India for GPT Realtime Regional.",
     )
     parser.add_argument("--agent-name", help="Reuse an existing matching voice agent without modifying it.")
     parser.add_argument("--model", choices=MODELS, default=MODEL, help="Explicit managed model; no automatic fallback.")
