@@ -218,6 +218,26 @@ def _canonical_definition(value: Any) -> Any:
     return definition
 
 
+def validate_definition(actual: Any, expected: Any) -> None:
+    """Check all requested settings, allowing service-added defaults."""
+
+    def check(stored: Any, requested: Any, path: str) -> None:
+        if isinstance(requested, dict) and isinstance(stored, dict):
+            for key, value in requested.items():
+                check(stored.get(key), value, f"{path}.{key}")
+        elif isinstance(requested, list):
+            if not isinstance(stored, list) or len(stored) != len(requested):
+                raise ValueError(f"Stored setting differs at {path}: {stored!r}")
+            for index, (actual_item, expected_item) in enumerate(zip(stored, requested)):
+                check(actual_item, expected_item, f"{path}[{index}]")
+        elif stored != requested:
+            raise ValueError(
+                f"Stored setting differs at {path}: expected {requested!r}, got {stored!r}"
+            )
+
+    check(_canonical_definition(actual), _canonical_definition(expected), "definition")
+
+
 def _walk_mcp_tools(value: Any) -> list[dict[str, Any]]:
     tools: list[dict[str, Any]] = []
     if isinstance(value, dict):
