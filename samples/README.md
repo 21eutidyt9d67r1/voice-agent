@@ -30,7 +30,8 @@ shared MCP, and portal workflow, start with the
 | [`simple_rest_lifecycle.py`](simple_rest_lifecycle.py) | Create a simple Agent with REST, or retrieve an existing Agent. |
 | [`basic_voice_agent.py`](basic_voice_agent.py) | Create and version a basic Agent, or connect to an existing Agent, then converse through the microphone. |
 | [Data Zone and regional realtime Voice Agents](realtime_datazone_voice_agent.md) | Create or reuse a voice-first Agent with an explicit managed model and hands-free microphone conversation. See the sample guide for region/model combinations and routing prerequisites. |
-| [Foundry GPT Live / OpenAI Python SDK sample](gpt_live/README.md) | Create an English-teacher agent or reuse `AGENT_NAME`, stream microphone audio with Responses delegation, and print the conversation ID and download command after close. |
+| [Foundry GPT Live with Responses delegation](gpt_live/README.md) | Create an English-teacher agent or reuse `AGENT_NAME`, stream microphone audio with Responses delegation, and print the conversation ID and download command after close. |
+| [Foundry GPT Live with managed prompt-agent delegation](gpt_live/README.md#managed-prompt-agent-delegation) | Create a prompt agent first, pin its version to a new GPT Live voice agent, then stream microphone audio with Foundry-managed delegation. |
 | [`voice_agent_with_mcp.py`](voice_agent_with_mcp.py) | Create an MCP Agent, converse through the microphone, and display tool arguments and output. |
 | [`voice_agent_with_foundry_iq.py`](voice_agent_with_foundry_iq.py) | Create a Foundry IQ Agent, converse through the microphone, and display tool activity. |
 | [`voice_agent_with_local_function.py`](voice_agent_with_local_function.py) | Execute `add_numbers` in the client, return its output, and hear the response. |
@@ -53,7 +54,7 @@ samples use their own `requirements.txt` files. The voice web sample uses a stan
 backend and does not require the Projects SDK; follow its README for setup.
 The common Python SDK samples require `azure-ai-projects>=2.7.0` from PyPI.
 
-The GPT Live terminal sample uses the shared `VoiceAgent/.venv` with additional
+The GPT Live terminal samples use the shared repository-root `.venv` with additional
 pinned packages and the OpenAI Live SDK. Follow its own README for configuration
 and installation.
 

@@ -257,13 +257,14 @@ class TranscriptDisplay:
         title: str | None = None,
         status: str | None = None,
         delta: str = "",
+        text: str | None = None,
     ):
-        """Display caller-supplied activity text without interpreting protocol events."""
+        """Append a delta or replace cumulative activity text; do not interpret events."""
         previous = self.agent_activities.get(key, AgentActivity())
         self.agent_activities[key] = AgentActivity(
             title=previous.title if title is None else title,
             status=previous.status if status is None else status,
-            text=previous.text + delta,
+            text=previous.text + delta if text is None else text,
         )
         self._latest_activity = key
         self._versions["delegation"] += 1

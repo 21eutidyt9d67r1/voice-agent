@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 # Shared mono PCM16 capture/streaming format: Audio validates WAVs and paces frames using these constants.
-# gpt_live.foundry_gpt_live_openai_sdk references RATE for input setup.
+# gpt_live.response_delegation and gpt_live.prompt_agent_delegation use RATE for audio setup.
 # realtime_stt.sample references RATE, FRAMES, and FRAME_BYTES for input setup and trailing silence.
 RATE = 24000  # Sample rate in Hz used for both microphone capture and WAV validation.
 FRAMES = 480  # Samples per frame; sends 20 ms of mono PCM16 at RATE.

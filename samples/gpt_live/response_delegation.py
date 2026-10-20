@@ -57,7 +57,7 @@ class EntraAuth(httpx.Auth):
 
 # Agent configuration is intentionally fully visible here, separate from the SDK conversation.
 def agent_payload(name):
-    backend = required("GPT_LIVE_DELEGATION_DEPLOYMENT")
+    backend = required("RESPONSE_DELEGATION_DEPLOYMENT")
     instructions = ENGLISH_TEACHER_INSTRUCTIONS + (
         " Handle greetings and casual conversation yourself. For grammar corrections, "
         "grammar explanations, or lesson planning, always delegate to the Responses "
@@ -90,6 +90,8 @@ async def converse(
     audio: Audio,
     transcript: TranscriptDisplay,
     backend_model: str,
+    *,
+    managed_delegation: bool = False,
 ) -> str | None:
     """The whole SDK event/audio loop is here so the sample can be read on its own."""
     events = connection.__aiter__()
@@ -114,7 +116,51 @@ async def converse(
             transcript.append_user(event.delta)
         elif event.type == "session.output_transcript.delta":
             transcript.append_agent(event.delta)
+        elif event.type.startswith("session.managed_delegation."):
+            # Foundry-specific events survive the OpenAI SDK parser as extra fields.
+            # These are diagnostics only: Foundry already forwards accepted guidance.
+            phase = event.type.rsplit(".", 1)[-1]
+            statuses = {
+                "started": "Prompt agent started",
+                "request": "Prompt agent request sent",
+                "progress": "Receiving accepted prompt-agent guidance",
+                "completed": "Prompt agent completed",
+                "failed": "Prompt agent failed",
+            }
+            if phase not in statuses:
+                return
+            status = statuses[phase]
+            text = None
+            if phase in {"progress", "completed"}:
+                # These fields are cumulative, not token deltas or spoken captions.
+                text = (
+                    "\n".join(
+                        f"[{tag}] {value}"
+                        for field, tag in (
+                            ("spoken_text", "commentary"),
+                            ("background_context", "thinking"),
+                        )
+                        if isinstance(value := getattr(event, field, None), str) and value
+                    )
+                    or None
+                )
+            elif phase == "failed":
+                status += f": {getattr(event, 'error_code', 'unknown_error')}"
+                # Preserve previously accepted text on partial failure. Do not show
+                # rejected output, retry the backend, or interrupt its spoken fallback.
+            transcript.update_agent_activity(
+                event.delegation_id,
+                title=f"Managed delegation → {backend_model}",
+                status=status,
+                text=text,
+            )
         elif event.type == "session.delegation.created":
+            if managed_delegation:
+                raise DemoError(
+                    "Expected Foundry-managed delegation, but received a native "
+                    "delegation trigger. Check that the service supports "
+                    "foundry_managed_agent with tagged_text; no client fallback was run."
+                )
             delegation = event.delegation
             transcript.update_agent_activity(
                 delegation.id,
@@ -129,6 +175,9 @@ async def converse(
                     content=content,
                 )
         elif event.type == "response.event":
+            if managed_delegation:
+                # Only managed lifecycle events report validated prompt-agent output.
+                return
             # Backend guidance is not the spoken teacher transcript.
             backend = event.event
             kind = backend.get("type")
@@ -264,7 +313,7 @@ async def check_deployments(http, base, payload):
     }
     delegation = definition.get("delegation") or {}
     if delegation.get("type") == "responses":
-        deployments["GPT_LIVE_DELEGATION_DEPLOYMENT"] = delegation["responses"]["model"]
+        deployments["RESPONSE_DELEGATION_DEPLOYMENT"] = delegation["responses"]["model"]
     for setting, name in deployments.items():
         response = await http.get(
             f"{base}/deployments/{quote(name, safe='')}",
@@ -336,9 +385,16 @@ async def main(*, auto_delete: bool = False):
                     print(f"Using existing agent: {name}, version {version}", flush=True)
                     await check_deployments(http, base, {"definition": definition})
                 delegation = definition.get("delegation") or {}
-                backend_model = (delegation.get("responses") or {}).get(
-                    "model"
-                ) or delegation.get("type", "client")
+                managed_delegation = delegation.get("type") in {
+                    "foundry_managed_agent",
+                    "managed_prompt_agent",
+                }
+                backend_model = (
+                    f"{delegation['agent_name']}:{delegation.get('agent_version') or 'active'}"
+                    if managed_delegation
+                    else (delegation.get("responses") or {}).get("model")
+                    or delegation.get("type", "client")
+                )
 
                 # The SDK appends /live/sessions. Point it at the agent protocol,
                 # not the model's /openai/v1 endpoint or a complete sessions URL.
@@ -368,6 +424,7 @@ async def main(*, auto_delete: bool = False):
                                 audio,
                                 transcript,
                                 backend_model,
+                                managed_delegation=managed_delegation,
                             )
             if conversation_id:
                 print(f"Conversation id: {conversation_id}", flush=True)
@@ -385,7 +442,7 @@ async def main(*, auto_delete: bool = False):
                     command_prefix = "& " if os.name == "nt" else ""
                     print(
                         "Download it later with the shared downloader "
-                        "(run from VoiceAgent):\n"
+                        "(run from the repository root):\n"
                         f"Set AZURE_VOICE_AGENTS_ENDPOINT to {base}.\n"
                         f'{command_prefix}"{sys.executable}" "{downloader}" '
                         f'"{name}" "{conversation_id}"',
