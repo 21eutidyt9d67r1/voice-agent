@@ -7,8 +7,8 @@ RemoteTool connection, MCP deployment, portal, or cross-layer failures.
 
 ## Runtime topology
 
-This reference covers the Voice Agent portal and its
-official Foundry path.
+This reference covers the local Voice Agent Portal and the separate
+customer-owned MCP path used by CLI samples.
 
 ```text
 browser
@@ -24,26 +24,24 @@ selected Foundry Project
   |-- immutable Voice Agent version
   |     |-- model_type + model deployment
   |     |-- MCP server_url
-  |     +-- project_connection_id
+  |     +-- no project_connection_id
   |
+  +--> public no-auth MCP configured by portal/templates.config.json
+
+CLI sample
+  |
+  v
+selected Foundry Project
+  +-- immutable Voice Agent version with project_connection_id
   +-- RemoteTool connection
-          |-- target: public MCP route
-          +-- CustomKeys Authorization bearer credential
-                    |
-                    v
-          local deployment:
-            native Python :18003 -> named Dev Tunnel
-          or Azure deployment:
-            Container App HTTPS ingress
-                    |
-                    v
-          shared MCP image
-            |-- /mcp/finance-handoff
-            +-- /mcp/finance-otp-officer
+        -> native Python :18003 + named Dev Tunnel
+        or customer Container App
+        -> shared_mcp reference implementation
 ```
 
-The browser never receives the MCP token. Foundry invokes MCP using the
-credential stored in the Project connection.
+The default Portal path has no MCP token or Project connection. In the CLI
+path, Foundry invokes MCP using the credential stored in the customer Project
+connection; the CLI never receives the token.
 
 ## Project and Agent ownership
 
@@ -55,14 +53,15 @@ Project from:
 3. `AZURE_AI_PROJECT_ENDPOINT` in each sample and
    `AZURE_VOICE_AGENTS_ENDPOINT` in portal `.env`.
 
-The two sample `.env` files should normally target the same Project used by the
-UI. The portal may switch Projects and upsert the fixed connection there
-before template publication, so never assume a connection created for one
-Project exists in another.
+The sample `.env` files may target the same Project used by the UI, but their
+customer-owned MCP connections are independent. The Portal may switch Projects,
+but it does not create or update a Project connection for its public no-auth
+MCP.
 
 Agent publication is immutable:
 
-- Example 1 source: `samples/example1_finance_with_handoff/agent.json`
+- Example 1 Realtime source: `samples/example1_finance_with_handoff_realtime/agent.json`
+- Example 1 Cascade source: `samples/example1_finance_with_handoff_cascade/agent.json`
 - Example 2 source:
   `samples/example2_finance_with_OTP_and_Officer_Search/agent.json`
 - CLI publication: each example's `sample.py`
@@ -111,40 +110,28 @@ under `shared_mcp/state/local/token`; do not print, commit, or paste it.
 
 ## Local process ownership
 
-`scripts/setup-local-examples.sh` prepares dependencies, builds the UI,
-and creates local `.env` files.
+The Portal and customer-owned MCP are separate:
 
-`scripts/manage-local-mcp-and-ui.sh` manages the runtime:
+- `portal/demo_server.py` starts the local UI on port `9527`;
+- `shared_mcp/scripts/e2e-local.sh` starts the native MCP on `18003` and its
+  named Dev Tunnel for CLI samples.
 
-- native Python MCP process;
-- named Dev Tunnel host;
-- Portal process;
-- template MCP readiness checks.
-
-State and logs:
+MCP evidence:
 
 ```text
-.local-mcp-and-ui/
-  mcp.pid
-  mcp.log       # manager/startup output
-  portal.pid
-  portal.log
-
 shared_mcp/state/e2e/<UTC-run>/
   native-mcp.log  # authoritative MCP HTTP/tool activity
 ```
-
-The lower-level `shared_mcp/scripts/e2e-local.sh` starts only the MCP path and
-leaves its tunnel host running.
 
 ## Evidence by boundary
 
 | Boundary | Evidence |
 | --- | --- |
 | Local dependencies/auth | `setup-local-examples.sh --check` |
-| MCP/UI processes | `manage-local-mcp-and-ui.sh status`, state logs |
-| Local MCP process | `http://127.0.0.1:18003/healthz`, manager PID/status |
-| Public MCP/auth/tools | Portal template probe JSON for Streamable HTTP; `native-mcp.log` for Foundry legacy HTTP+SSE |
+| Local Portal process | `http://127.0.0.1:9527/healthz`, Portal terminal output |
+| Local MCP process | `http://127.0.0.1:18003/healthz`, newest E2E artifacts |
+| Public MCP/tools | Portal template probe JSON for the no-auth service |
+| Customer-owned MCP auth/tools | E2E probe output and `native-mcp.log` |
 | Project selection | UI config/cookie, session `meta.json`, sample `.env` |
 | Model deployment | account deployment list, `model_type`, exact `model` |
 | Agent publication | `sample.py publish/check`, version and fingerprints |
@@ -158,35 +145,37 @@ leaves its tunnel host running.
 Run from `VoiceAgent/`. These commands do not print the MCP bearer token.
 
 ```bash
-# Local processes and their configured portal URL.
-./scripts/manage-local-mcp-and-ui.sh status
-
 # Dependency, environment, and authentication readiness.
 ./scripts/setup-local-examples.sh --check
+
+# Local Portal health.
+curl -fsS http://127.0.0.1:9527/healthz
 
 # Local MCP health.
 curl -fsS http://127.0.0.1:18003/healthz
 
-# Use the portal URL printed by the status command.
-curl -fsS http://127.0.0.1:18098/healthz
 curl -fsS \
-  http://127.0.0.1:18098/api/templates/finance-example-realtime/mcp/probe
+  http://127.0.0.1:9527/api/templates/finance-example-realtime/mcp/probe
 curl -fsS \
-  http://127.0.0.1:18098/api/templates/finance-example-cascade-luna/mcp/probe
+  http://127.0.0.1:9527/api/templates/finance-example-cascade-luna/mcp/probe
 curl -fsS \
-  http://127.0.0.1:18098/api/templates/finance-with-otp-and-officer-search/mcp/probe
+  http://127.0.0.1:9527/api/templates/finance-with-otp-and-officer-search/mcp/probe
 ```
 
-The Portal probes prove authenticated Streamable HTTP `initialize` and
-`tools/list`. They do not prove the legacy HTTP+SSE sequence used by every
-Foundry RemoteTool runtime. For a handoff activation failure, correlate the
-session timestamp with `native-mcp.log` and require `GET 200`, message
-`POST 202`, and `ListToolsRequest` before declaring the transport healthy.
+The Portal probes prove unauthenticated Streamable HTTP `initialize` and
+`tools/list` for the configured public service. They do not prove the legacy
+HTTP+SSE sequence used by a customer-owned Foundry RemoteTool connection. For
+a CLI-created Agent handoff failure, correlate the session timestamp with
+`native-mcp.log` and require `GET 200`, message `POST 202`, and
+`ListToolsRequest` before declaring the transport healthy.
 
 Verify the published Agent version using the same materialized settings:
 
 ```bash
-cd samples/example1_finance_with_handoff
+cd samples/example1_finance_with_handoff_realtime
+python sample.py check
+
+cd ../example1_finance_with_handoff_cascade
 python sample.py check
 
 cd ../example2_finance_with_OTP_and_Officer_Search

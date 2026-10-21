@@ -12,7 +12,48 @@ export function insertBeforeMessage(messages, message, beforeId) {
   return next;
 }
 
-export function describeSessionClose(code, reason = "") {
+export function updateAssistantTranscript(parts, event, responseId = "") {
+  const key = JSON.stringify([
+    event.response_id || responseId,
+    event.item_id ?? event.output_index ?? 0,
+    event.content_index ?? 0,
+    event.type.includes("audio_transcript") ? "audio" : "text",
+  ]);
+  const isDelta = event.type.endsWith(".delta");
+  const text = isDelta ? event.delta : (event.transcript || event.text || "");
+  if (text) {
+    const previous = parts.get(key);
+    parts.set(key, {
+      responseId: event.response_id || responseId,
+      outputIndex: event.output_index ?? previous?.outputIndex ?? parts.size,
+      contentIndex: event.content_index ?? 0,
+      text: isDelta ? (previous?.text || "") + text : text,
+    });
+  }
+
+  const responseOrder = new Map();
+  for (const part of parts.values()) {
+    if (!responseOrder.has(part.responseId)) responseOrder.set(part.responseId, responseOrder.size);
+  }
+  const ordered = [...parts.values()].sort((a, b) => (
+    responseOrder.get(a.responseId) - responseOrder.get(b.responseId)
+    || a.outputIndex - b.outputIndex
+    || a.contentIndex - b.contentIndex
+  ));
+  // A delta can split a word; add separators only between independent content parts.
+  return ordered.reduce((content, { text: part }) => {
+    const separator = /\S$/.test(content)
+      && /^[("'[\u201c\u2018]*[\p{Script=Latin}\p{Number}]/u.test(part)
+      && !/[(\[]$/.test(content)
+      ? " " : "";
+    return content + separator + part;
+  }, "");
+}
+
+export function describeSessionClose(code, reason = "", sessionError = "") {
+  if (sessionError) {
+    return { text: `error: ${sessionError}`, kind: "err" };
+  }
   if (code === 1001 && reason === "Conversation ended by agent") {
     return { text: "conversation ended by agent", kind: "ok" };
   }

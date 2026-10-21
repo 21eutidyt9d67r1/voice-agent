@@ -105,7 +105,7 @@ class ElevatorService:
 
     @staticmethod
     def _result(
-        state: dict[str, Any] | None,
+        current_state: dict[str, Any] | None,
         ok: bool,
         reason: str,
         **fields: Any,
@@ -113,8 +113,8 @@ class ElevatorService:
         return {
             "ok": ok,
             "reason_code": reason,
-            "call_id": state.get("call_id", "") if state else "",
-            "next_node": state.get("next_node", "") if state else "",
+            "call_id": current_state.get("call_id", "") if current_state else "",
+            "next_node": current_state.get("next_node", "") if current_state else "",
             **fields,
         }
 

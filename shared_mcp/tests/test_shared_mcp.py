@@ -49,7 +49,7 @@ else:
         / "example3_elevator_service_with_safety_zendesk_and_handoff"
         / "agent.json"
     )
-    HANDOFF_AGENT = SAMPLES_ROOT / "example1_finance_with_handoff" / "agent.json"
+    HANDOFF_AGENT = SAMPLES_ROOT / "example1_finance_with_handoff_realtime" / "agent.json"
     OTP_AGENT = (
         SAMPLES_ROOT
         / "example2_finance_with_OTP_and_Officer_Search"
@@ -211,7 +211,13 @@ class SharedMcpTests(unittest.TestCase):
         report_instructions = elevator_nodes["report_issue"]["config"][
             "instructions"
         ]
+        open_call_instructions = elevator_nodes["open_call"]["config"][
+            "instructions"
+        ]
         intent_router_instructions = elevator_nodes["intent_router"]["config"][
+            "instructions"
+        ]
+        query_instructions = elevator_nodes["query_issue"]["config"][
             "instructions"
         ]
         next_request_instructions = elevator_nodes["next_request"]["config"][
@@ -265,12 +271,44 @@ class SharedMcpTests(unittest.TestCase):
             report_instructions,
         )
         self.assertIn(
-            "directly to human_handoff as an emergency",
+            "This confirmation response is speech only",
+            report_instructions,
+        )
+        self.assertIn(
+            "caller_confirmed=true and the exact confirmed details. False is invalid.",
+            report_instructions,
+        )
+        self.assertIn(
+            "fresh random UUID v4",
+            open_call_instructions,
+        )
+        self.assertNotIn(
+            "d3f47b29-8912-4c3d-bc22-72f8c8a7c90e",
+            open_call_instructions,
+        )
+        self.assertIn(
+            "Choose human_handoff immediately for an explicit trapped person",
             intent_router_instructions,
         )
         self.assertIn(
-            "highest priority",
+            "This emergency rule takes priority over every other route.",
             intent_router_instructions,
+        )
+        self.assertIn(
+            "output only the graph handoff tool call",
+            intent_router_instructions,
+        )
+        self.assertIn(
+            "The report edge already asks the first safety question.",
+            intent_router_instructions,
+        )
+        self.assertIn(
+            "incoming edge owns",
+            query_instructions,
+        )
+        self.assertIn(
+            "Wait for the\n  caller's answer.",
+            query_instructions,
         )
         self.assertIn(
             "Your service ticket is [ticket_id]. Do you need",
@@ -291,7 +329,12 @@ class SharedMcpTests(unittest.TestCase):
             elevator_edges["next_request_to_finalize"]["transfer_message"],
             goodbye,
         )
-        self.assertIn("spoken_message", human_handoff_instructions)
+        self.assertTrue(
+            elevator_edges["intent_router_to_report_issue"]["transfer_message"].startswith(
+                "First, is anyone trapped or unable to exit safely?"
+            )
+        )
+        self.assertIn("exact browser notice", human_handoff_instructions)
         self.assertIn("human_finalize", human_handoff_instructions)
         self.assertIn(
             "emergency for an explicit",
@@ -546,6 +589,10 @@ class SharedMcpTests(unittest.TestCase):
                 "call-test-001",
                 "command-start-001",
             )
+            observed = service.get_call_state(
+                "call-test-001",
+                started["call_token"],
+            )
             recorded = service.record_issue(
                 "call-test-001",
                 started["call_token"],
@@ -605,6 +652,10 @@ class SharedMcpTests(unittest.TestCase):
             persisted,
         ):
             self.assertNotIn("state_version", result)
+        self.assertTrue(observed["ok"])
+        self.assertEqual("call-test-001", observed["state"]["call_id"])
+        self.assertNotIn("call_token_hash", observed["state"])
+        self.assertNotIn("operations", observed["state"])
         self.assertEqual(safety["action"], "clear")
         self.assertEqual(created["command"], "handoff_to_next_request")
         self.assertNotIn("ticket", created)

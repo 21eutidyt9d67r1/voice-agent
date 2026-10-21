@@ -60,6 +60,9 @@ export function createTurnTracker(startedAtMs = null, startSource = null) {
     contentAfterLastTool: false,
     lastToolCompletedAtMs: null,
     responseDoneWhileToolPending: false,
+    serverContinuationPending: false,
+    serverContinuationTargetReady: false,
+    responseDoneWhileContinuationPending: false,
     toolCalls: new Map(),
   };
 }
@@ -119,6 +122,11 @@ function ensureStarted(turn, nowMs, startSource = "response_created") {
 
 export function startAssistantResponse(turn, suggestedId, nowMs) {
   ensureStarted(turn, nowMs);
+  if (turn.serverContinuationTargetReady) {
+    turn.serverContinuationPending = false;
+    turn.serverContinuationTargetReady = false;
+    turn.responseDoneWhileContinuationPending = false;
+  }
   if (
     isNumber(nowMs)
     && !turn.responseStarts.some((response) => Math.abs(response.atMs - nowMs) < 1)
@@ -289,7 +297,31 @@ export function pendingToolCallCount(turn) {
   return count;
 }
 
+export function markServerContinuationPending(turn) {
+  turn.serverContinuationPending = true;
+  turn.serverContinuationTargetReady = false;
+  turn.responseDoneWhileContinuationPending = false;
+}
+
+export function markServerContinuationTargetReady(turn) {
+  if (turn.serverContinuationPending) {
+    turn.serverContinuationTargetReady = true;
+  }
+}
+
+export function abortServerContinuation(turn) {
+  const responseDone = turn.responseDoneWhileContinuationPending;
+  turn.serverContinuationPending = false;
+  turn.serverContinuationTargetReady = false;
+  turn.responseDoneWhileContinuationPending = false;
+  return responseDone;
+}
+
 export function shouldFinalizeOnResponseDone(turn) {
+  if (turn.serverContinuationPending) {
+    turn.responseDoneWhileContinuationPending = true;
+    return false;
+  }
   if (pendingToolCallCount(turn) > 0) {
     turn.responseDoneWhileToolPending = true;
     return false;
@@ -420,7 +452,9 @@ function phaseDefinition(turn, startAtMs, endAtMs, tools, responses) {
       category: "endpointing_eou",
       label: "Endpointing + EOU",
       tone: "other",
-      reason: "Last voiced microphone PCM to server speech_stopped",
+      reason: turn.startSource === "user_pcm_sent"
+        ? "Final user PCM packet sent to server speech_stopped"
+        : "Last voiced microphone PCM to server speech_stopped",
     };
   }
   if (responseAtStart) {
@@ -474,6 +508,7 @@ function milestoneLabel(turn, timestamp, tools, responses) {
   if (isAt(turn.startedAtMs)) {
     return {
       user_last_voiced: "last voiced microphone PCM",
+      user_pcm_sent: "final user PCM packet sent",
       server_vad: "server speech_stopped",
       text_input: "text input sent",
       idle_timeout: "idle timeout window start",
@@ -1187,7 +1222,7 @@ export function buildAllTurnLatencyTable(messages = []) {
       message?.type === "assistant"
       && message.metrics?.complete
       && isNumber(message.metrics.endToEndMs)
-      && ["user_last_voiced", "server_vad", "text_input", "idle_timeout", "agent_playback_end"].includes(
+      && ["user_pcm_sent", "user_last_voiced", "server_vad", "text_input", "idle_timeout", "agent_playback_end"].includes(
         message.metrics.startSource,
       )
     ))
@@ -1279,7 +1314,7 @@ function sumExclusionReason(message, ordinal) {
       ? "Initial greeting; no preceding user speech"
       : "Server-triggered response; no user-speech boundary";
   }
-  if (!["user_last_voiced", "server_vad", "agent_playback_end"].includes(source)) {
+  if (!["user_pcm_sent", "user_last_voiced", "server_vad", "agent_playback_end"].includes(source)) {
     return "No recorded audible trigger boundary";
   }
   if (!metrics.complete) return "Response is not complete";
@@ -1370,7 +1405,8 @@ export function pcmVoiceOffsetsMs(
     sampleRate = 24000,
     channels = 1,
     frameMs = 20,
-    peakThreshold = 0.015,
+    peakThreshold = 0.01,
+    rmsThreshold = 0.008,
   } = {},
 ) {
   if (!bytes || !bytes.byteLength || channels < 1 || sampleRate <= 0) {
@@ -1386,11 +1422,14 @@ export function pcmVoiceOffsetsMs(
   for (let frameStart = 0; frameStart < audioFrameCount; frameStart += detectorFrameSamples) {
     const frameEnd = Math.min(audioFrameCount, frameStart + detectorFrameSamples);
     let peak = 0;
+    let sumSquares = 0;
     for (let audioFrame = frameStart; audioFrame < frameEnd; audioFrame++) {
-      const sample = view.getInt16((audioFrame * channels) * 2, true);
-      peak = Math.max(peak, Math.abs(sample) / 32768);
+      const sample = view.getInt16((audioFrame * channels) * 2, true) / 32768;
+      peak = Math.max(peak, Math.abs(sample));
+      sumSquares += sample * sample;
     }
-    if (peak >= peakThreshold) {
+    const rms = Math.sqrt(sumSquares / Math.max(1, frameEnd - frameStart));
+    if (peak >= peakThreshold && rms >= rmsThreshold) {
       if (firstVoicedFrame == null) firstVoicedFrame = frameStart;
       lastVoicedFrame = frameEnd;
     }
@@ -1401,6 +1440,46 @@ export function pcmVoiceOffsetsMs(
     firstVoicedMs: firstVoicedFrame == null ? null : (firstVoicedFrame / sampleRate) * 1000,
     lastVoicedMs: lastVoicedFrame == null ? null : (lastVoicedFrame / sampleRate) * 1000,
   };
+}
+
+export function recordInputPcmPacket(
+  packets,
+  timelineStartMs,
+  durationMs,
+  sentAtMs,
+  historyMs = 60000,
+) {
+  if (
+    !Array.isArray(packets)
+    || !isNumber(timelineStartMs)
+    || !isNumber(durationMs)
+    || durationMs <= 0
+    || !isNumber(sentAtMs)
+  ) {
+    return timelineStartMs;
+  }
+  const timelineEndMs = timelineStartMs + durationMs;
+  packets.push({ startMs: timelineStartMs, endMs: timelineEndMs, sentAtMs });
+  const cutoffMs = timelineEndMs - historyMs;
+  while (packets.length && packets[0].endMs < cutoffMs) packets.shift();
+  return timelineEndMs;
+}
+
+export function inputPcmSentAtMs(packets, audioEndMs) {
+  if (!Array.isArray(packets) || !isNumber(audioEndMs)) return null;
+  for (let index = packets.length - 1; index >= 0; index--) {
+    const packet = packets[index];
+    if (
+      isNumber(packet?.startMs)
+      && isNumber(packet?.endMs)
+      && isNumber(packet?.sentAtMs)
+      && audioEndMs > packet.startMs
+      && audioEndMs <= packet.endMs
+    ) {
+      return packet.sentAtMs;
+    }
+  }
+  return null;
 }
 
 export function formatMetricMs(value) {

@@ -22,7 +22,7 @@ docker buildx build --help 2>&1 | grep -q -- '--build-context' || {
 docker buildx build --load \
   --build-arg PIP_INDEX_URL="${PIP_INDEX_URL}" \
   --build-context \
-    handoff_agent="${ROOT}/../samples/example1_finance_with_handoff" \
+    handoff_agent="${ROOT}/../samples/example1_finance_with_handoff_realtime" \
   --build-context \
     otp_agent="${ROOT}/../samples/example2_finance_with_OTP_and_Officer_Search" \
   --build-context \

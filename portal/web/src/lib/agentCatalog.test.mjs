@@ -7,6 +7,7 @@ import {
   asVoiceAgent,
   hostedAgentTargetPath,
   loadVoiceAgent,
+  loadVoiceAgentPage,
   loadVoiceAgents,
   validateHostedAgentTarget,
 } from "./agentCatalog.mjs";
@@ -166,6 +167,67 @@ test("loads every page, filters voice agents, and sorts newest first", async () 
   assert.deepEqual(calls, [
     "/agents?api-version=v1&kind=voice&limit=100",
     "/agents?api-version=v1&kind=voice&limit=100&after=older-voice",
+  ]);
+});
+
+test("loads one bounded agent page and returns its continuation cursor", async () => {
+  const calls = [];
+  const fetchImpl = async (path, options) => {
+    calls.push({ path, options });
+    return {
+      ok: true,
+      json: async () => ({
+        data: [
+          resource("not-voice", "prompt", 30),
+          resource("older-voice", "voice", 10),
+          resource("newer-voice", "voice", 20),
+        ],
+        has_more: true,
+        last_id: "page-2",
+      }),
+    };
+  };
+
+  const page = await loadVoiceAgentPage(
+    { apiVersion: "v1", foundryFeatures: "VoiceAgents=V1Preview" },
+    {},
+    fetchImpl,
+  );
+
+  assert.deepEqual(page.agents.map((agent) => agent.name), ["newer-voice", "older-voice"]);
+  assert.equal(page.hasMore, true);
+  assert.equal(page.nextCursor, "page-2");
+  assert.equal(calls[0].path, "/agents?api-version=v1&kind=voice&limit=25");
+  assert.equal(
+    calls[0].options.headers["Foundry-Features"],
+    "VoiceAgents=V1Preview",
+  );
+});
+
+test("requests the next agent page without walking later cursors", async () => {
+  const calls = [];
+  const fetchImpl = async (path) => {
+    calls.push(path);
+    return {
+      ok: true,
+      json: async () => ({
+        data: [resource("next-voice", "voice", 10)],
+        has_more: false,
+      }),
+    };
+  };
+
+  const page = await loadVoiceAgentPage(
+    { apiVersion: "v1", foundryFeatures: "VoiceAgents=V1Preview" },
+    { after: "page-2" },
+    fetchImpl,
+  );
+
+  assert.deepEqual(page.agents.map((agent) => agent.name), ["next-voice"]);
+  assert.equal(page.hasMore, false);
+  assert.equal(page.nextCursor, "");
+  assert.deepEqual(calls, [
+    "/agents?api-version=v1&kind=voice&limit=25&after=page-2",
   ]);
 });
 

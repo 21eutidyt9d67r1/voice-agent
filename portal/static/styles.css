@@ -208,6 +208,437 @@ button.danger { background: #dc2626; color: #fff; border-color: #dc2626; }
                     animation: edge-flow 1s linear infinite; }
 @keyframes edge-flow { to { stroke-dashoffset: -12; } }
 
+/* Runtime graph uses the same card-and-route visual language as Handoff Graph authoring. */
+.runtime-graph-wrap {
+  min-height: 24rem;
+  padding: 0;
+  border: 1px solid #dbe7e2;
+  border-radius: 10px;
+  background-color: #f8fbfa;
+  background-image: radial-gradient(circle, rgba(89, 120, 111, 0.16) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+.runtime-graph-canvas { position: relative; min-width: 100%; }
+.runtime-edge-layer { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.runtime-edge {
+  fill: none;
+  stroke: rgba(15, 159, 118, 0.72);
+  stroke-width: 1.8px;
+}
+.runtime-edge.outer { stroke: #8d65c5; stroke-dasharray: 8 6; }
+.runtime-edge.available { stroke: #249e7d; stroke-width: 2.4px; }
+.runtime-edge.taken {
+  stroke: #2563eb;
+  stroke-width: 3px;
+  stroke-dasharray: 8 6;
+  filter: drop-shadow(0 2px 3px rgba(37, 99, 235, 0.28));
+  animation: edge-flow 1s linear infinite;
+}
+.runtime-edge-layer marker path { fill: #159f76; }
+.runtime-edge-layer marker[id$="-arrow-active"] path { fill: #2563eb; }
+
+.runtime-node-card {
+  position: absolute;
+  width: 320px;
+  height: 149px;
+  overflow: visible;
+  border: 1px solid #cfddd8;
+  border-radius: 11px;
+  color: #203a33;
+  background: linear-gradient(145deg, #ffffff, #f6faf8);
+  box-shadow: 0 12px 28px rgba(32, 58, 51, 0.12);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.runtime-node-card::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  content: "";
+  border-radius: 11px 11px 0 0;
+  background: #5879f0;
+  opacity: 0.75;
+}
+.runtime-node-card.entry::before { background: #0f9f76; }
+.runtime-node-card.unvisited {
+  border-color: #aeb9b5;
+  background: #eef1f0;
+  box-shadow: 0 8px 18px rgba(48, 62, 57, 0.09);
+}
+.runtime-node-card.unvisited::after {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  content: "NOT VISITED";
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.96);
+  background: rgba(68, 80, 76, 0.5);
+  backdrop-filter: grayscale(1) saturate(0.08) blur(0.5px);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.13em;
+  text-shadow: 0 1px 4px rgba(20, 29, 26, 0.55);
+  pointer-events: none;
+}
+.runtime-node-card.visited {
+  z-index: 5;
+  border: 2px solid #0b9d78;
+  background:
+    linear-gradient(rgba(218, 250, 238, 0.88), rgba(244, 255, 250, 0.94)),
+    #fff;
+  box-shadow:
+    0 12px 28px rgba(10, 123, 91, 0.2);
+}
+.runtime-node-card.completed::before { height: 4px; background: #08765c; opacity: 1; }
+.runtime-node-card.completed .runtime-node-icon {
+  border-radius: 50%;
+  color: #fff;
+  background: #08765c;
+  font-size: 25px;
+  font-weight: 900;
+}
+.runtime-node-card.stopped {
+  border-color: #9cafa7;
+  background: #f0f4f2;
+  box-shadow: 0 8px 18px rgba(48, 62, 57, 0.1);
+}
+.runtime-node-card.stopped::before { background: #9cafa7; }
+.runtime-node-card.selected {
+  border-color: #7057d9;
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.12),
+    0 0 28px rgba(168, 63, 177, 0.16),
+    0 16px 34px rgba(32, 58, 51, 0.15);
+}
+.runtime-node-card.active {
+  --runtime-ring-angle: 0deg;
+  z-index: 7;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(145deg, #ffffff, #f6faf8) padding-box,
+    conic-gradient(
+      from var(--runtime-ring-angle),
+      #ff3d7f,
+      #ff7a00,
+      #ffd600,
+      #2dcc70,
+      #00c2ff,
+      #356dff,
+      #8b5cff,
+      #ff3d7f
+    ) border-box;
+  animation: runtime-node-rainbow-ring 1.6s linear infinite;
+  box-shadow:
+    0 0 22px rgba(53, 109, 255, 0.24),
+    0 16px 34px rgba(32, 58, 51, 0.2);
+}
+.runtime-node-card.active::before {
+  background: linear-gradient(90deg, #0f9f76, #2563eb, #a83fb1);
+  opacity: 1;
+}
+@property --runtime-ring-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes runtime-node-rainbow-ring {
+  to { --runtime-ring-angle: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runtime-node-card.active { animation: none; }
+}
+.runtime-node-state {
+  position: absolute;
+  z-index: 4;
+  top: -15px;
+  right: 11px;
+  padding: 5px 10px;
+  border: 2px solid rgba(15, 159, 118, 0.38);
+  border-radius: 999px;
+  color: #08765c;
+  background: #e3f7ef;
+  box-shadow: 0 4px 12px rgba(15, 122, 91, 0.15);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.runtime-node-state-icon { font-size: 16px; line-height: 1; }
+.runtime-node-state.completed {
+  top: -20px;
+  min-height: 32px;
+  padding: 6px 12px;
+  color: #fff;
+  border-color: #045d47;
+  background: #08765c;
+  box-shadow: 0 5px 16px rgba(4, 93, 71, 0.35);
+  font-size: 12px;
+  font-weight: 900;
+}
+.runtime-node-state.stopped { color: #526661; border-color: #afbfba; background: #eef2f0; }
+.runtime-node-state.live {
+  color: #fff;
+  border-color: #08765c;
+  background: linear-gradient(135deg, #08765c, #16a77f);
+  box-shadow: 0 7px 18px rgba(8, 118, 92, 0.4);
+}
+.runtime-node-open {
+  display: flex;
+  width: 100%;
+  height: 54px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.runtime-node-open:hover { background: rgba(15, 159, 118, 0.035); }
+.runtime-node-open:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.3); outline-offset: -3px; }
+.runtime-node-identity {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.runtime-node-identity > span:last-child { min-width: 0; }
+.runtime-node-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: #08765c;
+  background: #e2f5ee;
+  font-size: 20px;
+}
+.runtime-node-identity b,
+.runtime-node-identity small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-node-identity b { color: #203a33; font-size: 14px; font-weight: 760; }
+.runtime-node-identity small { margin-top: 3px; color: #7a8984; font-size: 9px; }
+.runtime-node-pipeline { display: flex; flex: 0 0 auto; gap: 5px; }
+.runtime-pipeline-stage {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border: 1px solid #d7e2de;
+  border-radius: 8px;
+  color: #fff;
+  background: #64748b;
+  font-size: 8px;
+  font-weight: 850;
+  box-shadow: 0 5px 12px rgba(22, 33, 31, 0.18);
+}
+.runtime-pipeline-stage.brand-mai { background: linear-gradient(145deg, #5b3fd6, #147fd1 62%, #23b8a0); }
+.runtime-pipeline-stage.brand-whisper { background: linear-gradient(145deg, #ee447f, #f06b35); }
+.runtime-pipeline-stage.brand-gpt { background: #111816; }
+.runtime-pipeline-stage.brand-azure { background: linear-gradient(145deg, #0057b8, #00a4ef); }
+.runtime-pipeline-stage.brand-voice { background: linear-gradient(145deg, #7c3aed, #d946ef); }
+.runtime-pipeline-stage.brand-speech { background: linear-gradient(145deg, #0f766e, #14b8a6); }
+.runtime-node-utility {
+  display: flex;
+  height: 37px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border-top: 1px solid #dde7e3;
+  color: #687a74;
+  background: #fff;
+  font-size: 9px;
+}
+.runtime-node-utility > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 23px;
+  padding: 0 7px;
+  border: 1px solid #dce6e2;
+  border-radius: 6px;
+  background: #f7faf9;
+}
+.runtime-node-utility > span.configured {
+  color: #6d36c9;
+  border-color: rgba(124, 58, 237, 0.2);
+  background: rgba(124, 58, 237, 0.065);
+}
+.runtime-node-utility .routes { margin-left: auto; }
+.runtime-node-utility b { color: #263e37; }
+.runtime-node-metrics {
+  display: grid;
+  width: 100%;
+  height: 58px;
+  min-height: 58px;
+  padding: 0;
+  grid-template-columns: repeat(3, 1fr);
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid rgba(31, 64, 56, 0.12);
+  border-radius: 0 0 10px 10px;
+  color: #203a33;
+  background:
+    linear-gradient(90deg, rgba(15, 159, 118, 0.1), rgba(37, 99, 235, 0.075)),
+    #f8fbfa;
+  text-align: left;
+  cursor: pointer;
+}
+.studio button.runtime-node-metrics {
+  min-height: 58px;
+  padding: 0;
+  border-width: 1px 0 0;
+  border-radius: 0 0 10px 10px;
+  background:
+    linear-gradient(90deg, rgba(15, 159, 118, 0.1), rgba(37, 99, 235, 0.075)),
+    #f8fbfa;
+}
+.studio button.runtime-node-metrics:hover:not(:disabled),
+.studio button.runtime-node-metrics[aria-expanded="true"] {
+  border-color: rgba(15, 159, 118, 0.26);
+  background:
+    linear-gradient(90deg, rgba(15, 159, 118, 0.17), rgba(37, 99, 235, 0.13)),
+    #fff;
+}
+.runtime-node-metrics span {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 7px 12px;
+  color: #5b7068;
+  font-size: 10px;
+  font-weight: 720;
+  text-transform: uppercase;
+  letter-spacing: 0.035em;
+}
+.runtime-node-metrics span + span { border-left: 1px solid rgba(31, 64, 56, 0.12); }
+.runtime-node-metrics b {
+  color: #08765c;
+  font-size: 16px;
+  font-weight: 820;
+  letter-spacing: -0.025em;
+  text-transform: none;
+}
+.runtime-node-metrics span:nth-child(2) b { color: #315eea; }
+.runtime-node-metrics span:nth-child(3) b { color: #8c3bb2; }
+.runtime-flip-value { display: block; min-height: 22px; perspective: 180px; }
+.runtime-flip-value > span {
+  display: block;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  animation: runtime-number-flip 0.48s cubic-bezier(0.2, 0.78, 0.2, 1);
+  transform-origin: center bottom;
+}
+@keyframes runtime-number-flip {
+  from { opacity: 0.2; transform: translateY(5px) rotateX(-72deg); }
+  to { opacity: 1; transform: translateY(0) rotateX(0); }
+}
+.runtime-node-card.metrics-open { z-index: 24; }
+.runtime-node-breakdown {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: -1px;
+  left: -1px;
+  padding: 12px;
+  border: 1px solid #c9dbd4;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(32, 58, 51, 0.22);
+  backdrop-filter: blur(12px);
+}
+.runtime-observed-latency > strong {
+  color: #29443b;
+  font-size: 11px;
+}
+.runtime-observed-latency > div {
+  display: grid;
+  margin-top: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+.runtime-observed-latency span {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 6px;
+  background: #f3f8f6;
+}
+.runtime-observed-latency em,
+.runtime-stage-estimates em {
+  color: #71827c;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+.runtime-observed-latency b { color: #315eea; font-size: 10px; }
+.runtime-observed-latency p {
+  margin: 7px 0 0;
+  color: #71827c;
+  font-size: 9px;
+}
+.runtime-estimate-head {
+  display: grid;
+  margin-top: 11px;
+  padding-top: 10px;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  border-top: 1px solid #dfe9e5;
+  color: #6a7d76;
+  font-size: 9px;
+}
+.runtime-estimate-head strong { color: #08765c; font-size: 10px; }
+.runtime-estimate-head strong + strong { color: #8c3bb2; }
+.runtime-stage-estimates {
+  display: grid;
+  margin-top: 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.runtime-stage-estimates > span {
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+  border: 1px solid #e0e9e6;
+  border-radius: 7px;
+  background: #fafcfb;
+}
+.runtime-stage-estimates b { color: #315eea; font-size: 10px; }
+.runtime-stage-estimates small { color: #08765c; font-size: 8px; }
+.runtime-estimate-note {
+  margin: 9px 0 0;
+  color: #778780;
+  font-size: 8px;
+  line-height: 1.45;
+}
+.runtime-node-port {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  transform: translateX(-50%);
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #0f9f76;
+  box-shadow: 0 0 0 1px rgba(15, 159, 118, 0.45), 0 3px 9px rgba(32, 58, 51, 0.22);
+}
+.runtime-node-port.input { top: -8px; background: #2563eb; }
+.runtime-node-port.output { bottom: -8px; }
+
 /* ---- Node modal (prompt + tools + edges for one node) ----
    Over the page rather than under the diagram: the prompt runs to hundreds of words and each
    tool needs a URL, an allow-list and a test result beside it, which a column that also holds

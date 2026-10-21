@@ -9,9 +9,10 @@ import ipaddress
 import json
 import re
 import socket
+import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -23,8 +24,10 @@ from dotenv import dotenv_values
 
 try:
     from .common import AgentsConfig, FOUNDRY_FEATURES
+    from .guide_render import render_page
 except ImportError:
     from common import AgentsConfig, FOUNDRY_FEATURES
+    from guide_render import render_page
 
 
 ROOT = Path(__file__).resolve().parent
@@ -33,6 +36,9 @@ VOICE_AGENT_ROOT = ROOT.parent
 SAMPLES_DIR = VOICE_AGENT_ROOT / "samples"
 SHARED_MCP_DIR = VOICE_AGENT_ROOT / "shared_mcp"
 DOCS_DIR = VOICE_AGENT_ROOT / "docs"
+sys.path.insert(0, str(SAMPLES_DIR))
+from voice_agent_definition import materialize_handoff_instruction_inheritance
+
 DEFAULT_TEMPLATE_CONFIG = ROOT / "templates.config.json"
 ARM_TOKEN_SCOPE = "https://management.azure.com/.default"
 ARM_MANAGEMENT_BASE = "https://management.azure.com"
@@ -280,6 +286,286 @@ def mcp_handshake(url: str, bearer_token: str = "") -> dict[str, Any]:
     }
 
 
+_TOOL_NAME_CHARS = re.compile(r"[^a-z0-9]")
+WORK_IQ_NOTE = (
+    "Work IQ can't be connected with an MCP URL yet. Its calendar, Teams, and mail tools act as "
+    "the signed-in Microsoft 365 user, and the shared Playground can't hold that identity, so "
+    "this Agent keeps using mock data here. In your own Foundry Project, attach a Work IQ "
+    "Toolbox instead."
+)
+
+
+@dataclass(frozen=True)
+class ToolGroup:
+    """Business system behind a set of Template tools, connected to one MCP server."""
+
+    id: str
+    label: str
+    pattern: re.Pattern[str]
+    connectable: bool = True
+    note: str = ""
+
+
+# Mock tools grouped by the real system they stand for, in display order.
+TOOL_GROUPS = (
+    ToolGroup("salesforce", "Salesforce", re.compile(r"^mock_tool_call_salesforce_")),
+    ToolGroup("zendesk", "Zendesk", re.compile(r"^mock_tool_call_zendesk_")),
+    ToolGroup("twilio", "Twilio SMS", re.compile(r"^mock_tool_call_twilio_")),
+    ToolGroup(
+        "work_iq",
+        "Microsoft 365 (Work IQ)",
+        re.compile(
+            r"^mock_tool_call_(find_meeting_times|get_user_date_and_time_zone_settings|create_event"
+            r"|list_calendar_view|update_event|cancel_event|get_user_presence|send_email_with_attachments)$"
+        ),
+        connectable=False,
+        note=WORK_IQ_NOTE,
+    ),
+    ToolGroup("orders", "Order system", re.compile(r"^mock_tool_call_order_")),
+    ToolGroup("reservations", "Reservation system", re.compile(r"^mock_tool_call_hotel_")),
+    ToolGroup("records", "Learning and research records", re.compile(r"^mock_tool_call_(quiz|training|research)_")),
+)
+OTHER_TOOL_GROUP = ToolGroup("other", "Other tools", re.compile(""))
+
+
+def tool_group(name: str) -> ToolGroup:
+    """The business system a Template tool belongs to."""
+    return next((group for group in TOOL_GROUPS if group.pattern.search(name)), OTHER_TOOL_GROUP)
+
+
+def tool_groups(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    """The systems a definition's mock tools belong to, each with its tools, in display order."""
+    tools = [name for name in required_mcp_tools(definition) if name.startswith("mock_tool_call_")]
+    groups = []
+    for group in (*TOOL_GROUPS, OTHER_TOOL_GROUP):
+        names = [name for name in tools if tool_group(name) is group]
+        if names:
+            groups.append({
+                "id": group.id,
+                "label": group.label,
+                "tools": names,
+                "connectable": group.connectable,
+                "note": group.note,
+            })
+    return groups
+
+
+def required_mcp_tools(definition: dict[str, Any]) -> list[str]:
+    """Every MCP tool name a definition's stages allow, in first-use order."""
+    names = (
+        str(name)
+        for tool in iter_mcp_tools(definition)
+        for name in tool.get("allowed_tools") or []
+        if isinstance(name, str) and name
+    )
+    return list(dict.fromkeys(names))
+
+
+def _tool_key(name: str) -> str:
+    """Compare tool names across naming styles: drop a mock or server-label prefix, case, and separators."""
+    bare = name.rsplit("___", 1)[-1]
+    if bare.startswith("mock_tool_call_"):
+        bare = bare[len("mock_tool_call_"):]
+    return _TOOL_NAME_CHARS.sub("", bare.lower())
+
+
+def suggest_tool_map(required: list[str], available: list[str]) -> dict[str, str]:
+    """Map each required tool to a server tool with the same name in any naming style, or ''."""
+    by_key: dict[str, str] = {}
+    for name in available:
+        by_key.setdefault(_tool_key(name), name)
+    return {
+        name: name if name in available else by_key.get(_tool_key(name), "")
+        for name in required
+    }
+
+
+def validate_tool_map(
+    required: list[str],
+    available: list[str],
+    tool_map: Any,
+) -> dict[str, str]:
+    """Check that every required tool maps to a tool the server lists."""
+    if not isinstance(tool_map, dict):
+        raise ValueError("tool_map must map every template tool to a server tool.")
+    mapped = {str(key): str(value or "").strip() for key, value in tool_map.items()}
+    missing = [name for name in required if not mapped.get(name)]
+    if missing:
+        raise ValueError(f"Choose a server tool for: {', '.join(missing)}")
+    unknown = sorted({mapped[name] for name in required} - set(available))
+    if unknown:
+        raise ValueError(f"The MCP server does not list: {', '.join(unknown)}")
+    return {name: mapped[name] for name in required}
+
+
+def _split_mcp_tool(
+    tool: dict[str, Any],
+    servers: dict[str, tuple[str, dict[str, str]]],
+) -> list[dict[str, Any]]:
+    """Split one MCP tool into one per connected system; unconnected tools stay on the tool's server."""
+    kept: list[str] = []
+    connected: dict[str, list[str]] = {}
+    for name in tool.get("allowed_tools") or []:
+        group = tool_group(str(name)).id
+        if group in servers:
+            connected.setdefault(group, []).append(servers[group][1][str(name)])
+        else:
+            kept.append(str(name))
+    split: list[dict[str, Any]] = []
+    if kept:
+        split.append({**tool, "allowed_tools": kept})
+    for group, names in connected.items():
+        entry = {
+            **tool,
+            "server_label": group,
+            "server_url": servers[group][0],
+            "allowed_tools": list(dict.fromkeys(names)),
+        }
+        for key in ("project_connection_id", "authorization", "headers"):
+            entry.pop(key, None)
+        split.append(entry)
+    return split
+
+
+def apply_tool_servers(
+    definition: dict[str, Any],
+    servers: dict[str, tuple[str, dict[str, str]]],
+) -> dict[str, Any]:
+    """Point each connected system's tools at the user's MCP server for that system.
+
+    ``servers`` maps a tool group ID to its server URL and the map from Template tool to
+    server tool. Tools of other systems keep their server. Mapped tool names are renamed in
+    the instructions.
+    """
+    if not servers:
+        return definition
+
+    def split(value: Any) -> Any:
+        if isinstance(value, list):
+            items: list[Any] = []
+            for item in value:
+                if isinstance(item, dict) and item.get("type") == "mcp":
+                    items.extend(_split_mcp_tool(item, servers))
+                else:
+                    items.append(split(item))
+            return items
+        if isinstance(value, dict):
+            return {key: split(item) for key, item in value.items()}
+        return value
+
+    definition = split(definition)
+    renames = {
+        old: new
+        for _, tool_map in servers.values()
+        for old, new in tool_map.items()
+        if old != new
+    }
+    if not renames:
+        return definition
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(name) for name in sorted(renames, key=len, reverse=True)) + r")\b"
+    )
+
+    def rename(value: Any) -> Any:
+        if isinstance(value, str):
+            return pattern.sub(lambda match: renames[match.group(1)], value)
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: item if key in {"allowed_tools", "server_url"} else rename(item)
+                for key, item in value.items()
+            }
+        return value
+
+    return rename(definition)
+
+
+MOCK_SERVER_LABEL = "mock_tool_call"
+MOCK_ROUTE_SUFFIX = "/mcp/mock-tool-call"
+
+
+def definition_tool_groups(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    """Systems a working definition uses: mock tools per system, plus systems already connected."""
+    groups = {group["id"]: {**group, "connected": None} for group in tool_groups(definition)}
+    by_id = {group.id: group for group in TOOL_GROUPS}
+    for tool in iter_mcp_tools(definition):
+        group = by_id.get(str(tool.get("server_label") or ""))
+        if group is None:
+            continue
+        entry = groups.setdefault(group.id, {
+            "id": group.id, "label": group.label, "tools": [],
+            "connectable": group.connectable, "note": group.note, "connected": None,
+        })
+        connected = entry["connected"] or {"server_url": str(tool.get("server_url") or ""), "tools": []}
+        connected["tools"] = list(dict.fromkeys([*connected["tools"], *(tool.get("allowed_tools") or [])]))
+        entry["connected"] = connected
+    order = [group.id for group in (*TOOL_GROUPS, OTHER_TOOL_GROUP)]
+    return sorted(groups.values(), key=lambda group: order.index(group["id"]))
+
+
+def revert_tool_server(
+    definition: dict[str, Any],
+    group_id: str,
+    tool_map: dict[str, str],
+    mock_url: str,
+) -> dict[str, Any]:
+    """Move a connected system's tools back to the mock server and restore their mock names."""
+    reverse = {new: old for old, new in tool_map.items()}
+
+    def merge(tools: list[Any]) -> list[Any]:
+        merged: list[Any] = []
+        mock: dict[str, Any] | None = None
+        for tool in tools:
+            if isinstance(tool, dict) and tool.get("type") == "mcp" and tool.get("server_label") == group_id:
+                tool = {
+                    **tool,
+                    "server_label": MOCK_SERVER_LABEL,
+                    "server_url": mock_url,
+                    "allowed_tools": [reverse.get(str(name), str(name)) for name in tool.get("allowed_tools") or []],
+                }
+            if isinstance(tool, dict) and tool.get("type") == "mcp" and tool.get("server_label") == MOCK_SERVER_LABEL:
+                if mock is not None:
+                    mock["allowed_tools"] = list(dict.fromkeys([*mock["allowed_tools"], *tool["allowed_tools"]]))
+                    continue
+                mock = {**tool, "allowed_tools": list(tool.get("allowed_tools") or [])}
+                tool = mock
+            merged.append(tool)
+        return merged
+
+    def walk(value: Any) -> Any:
+        if isinstance(value, list):
+            items = [walk(item) for item in value]
+            if any(isinstance(item, dict) and item.get("type") == "mcp" for item in items):
+                return merge(items)
+            return items
+        if isinstance(value, dict):
+            return {key: walk(item) for key, item in value.items()}
+        return value
+
+    definition = walk(definition)
+    renames = {new: old for old, new in tool_map.items() if old != new}
+    if not renames:
+        return definition
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(name) for name in sorted(renames, key=len, reverse=True)) + r")\b"
+    )
+
+    def rename(value: Any) -> Any:
+        if isinstance(value, str):
+            return pattern.sub(lambda match: renames[match.group(1)], value)
+        if isinstance(value, list):
+            return [rename(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: item if key in {"allowed_tools", "server_url"} else rename(item)
+                for key, item in value.items()
+            }
+        return value
+
+    return rename(definition)
+
+
 def materialize_template(
     document: dict[str, Any],
     *,
@@ -287,6 +573,7 @@ def materialize_template(
     voice: str,
     mcp_server_url: str,
     mcp_connection_id: str,
+    mcp_public: bool = False,
 ) -> dict[str, Any]:
     definition = copy.deepcopy(document["definition"])
     if model.strip():
@@ -299,13 +586,17 @@ def materialize_template(
     if mcp_tools:
         server_url = validate_https_url(mcp_server_url, "MCP server URL")
         connection_id = mcp_connection_id.strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", connection_id):
+        if not mcp_public and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", connection_id):
             raise ValueError("MCP connection ID is required and has an invalid format.")
         for tool in mcp_tools:
             tool["server_url"] = server_url
-            tool["project_connection_id"] = connection_id
+            if mcp_public:
+                tool.pop("project_connection_id", None)
+            else:
+                tool["project_connection_id"] = connection_id
             tool.pop("authorization", None)
             tool.pop("headers", None)
+    materialize_handoff_instruction_inheritance(definition)
     return definition
 
 
@@ -474,7 +765,8 @@ class TemplateCatalog:
         self.allowed_root = allowed_root.resolve()
         self.mcp_root = mcp_root.resolve()
         self._sources: tuple[TemplateSource, ...] = ()
-        self._documents: dict[str, dict[str, Any]] = {}
+        self._versions: dict[str, dict[str, TemplateSource]] = {}
+        self._documents: dict[Path, dict[str, Any]] = {}
         self._errors: list[dict[str, str]] = []
         self.reload()
 
@@ -483,8 +775,6 @@ class TemplateCatalog:
         return copy.deepcopy(self._errors)
 
     def reload(self) -> None:
-        self._documents.clear()
-        self._errors = []
         try:
             payload = json.loads(self.config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -496,6 +786,9 @@ class TemplateCatalog:
         entries = payload.get("templates")
         if not isinstance(entries, list):
             raise RuntimeError("Template config must contain a templates array.")
+        self._documents.clear()
+        self._versions.clear()
+        self._errors = []
         sources: list[TemplateSource] = []
         seen: set[str] = set()
         for index, entry in enumerate(entries):
@@ -531,9 +824,9 @@ class TemplateCatalog:
                 connection_mode = str(
                     mcp_config.get("connection_mode") or "managed"
                 ).strip()
-                if connection_mode not in {"managed", "existing"}:
+                if connection_mode not in {"managed", "existing", "public"}:
                     raise ValueError(
-                        "mcp.connection_mode must be 'managed' or 'existing'"
+                        "mcp.connection_mode must be 'managed', 'existing', or 'public'"
                     )
                 allowed_backends_value = (
                     mcp_config.get("allowed_backends") or []
@@ -598,30 +891,7 @@ class TemplateCatalog:
                     mcp_token_file=mcp_token_file,
                     lock_runtime=lock_runtime,
                 )
-                document = self._load(source)
-                if list(iter_mcp_tools(document["definition"])):
-                    if not source.mcp_server_url and source.mcp_config_path is None:
-                        raise ValueError("mcp.server_url is required for an MCP template")
-                    if source.mcp_server_url:
-                        validate_https_url(source.mcp_server_url, "mcp.server_url")
-                    if source.mcp_connection_id and not re.fullmatch(
-                        r"[A-Za-z0-9][A-Za-z0-9._-]*",
-                        source.mcp_connection_id,
-                    ):
-                        raise ValueError("MCP connection ID has an invalid format")
-                    if (
-                        source.mcp_config_path
-                        and source.mcp_config_path.is_file()
-                        and not (
-                            source.mcp_server_url
-                            and source.mcp_connection_id
-                        )
-                    ):
-                        raise ValueError(
-                            "mcp.config_file must define both "
-                            "VOICE_AGENT_MCP_SERVER_URL and "
-                            "VOICE_AGENT_MCP_CONNECTION_ID"
-                        )
+                self._validate_source(source)
             except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
                 self._errors.append(
                     {"id": template_id or f"entry-{index}", "error": str(error)}
@@ -629,44 +899,104 @@ class TemplateCatalog:
                 continue
             seen.add(template_id)
             sources.append(source)
+            versions = {".": source}
+            for candidate in sorted(folder.rglob(path.name)):
+                if candidate == folder / agent_file:
+                    continue
+                version = candidate.parent.relative_to(folder).as_posix()
+                if version == ".":
+                    continue
+                try:
+                    version_path = candidate.resolve()
+                    if not version_path.is_relative_to(folder):
+                        raise ValueError("Version resolves outside the configured folder")
+                    version_source = replace(source, path=version_path)
+                    self._validate_source(version_source)
+                except (OSError, ValueError, RuntimeError) as error:
+                    self._errors.append({
+                        "id": template_id, "version": version, "error": str(error),
+                    })
+                    continue
+                versions[version] = version_source
+            self._versions[template_id] = versions
         self._sources = tuple(sources)
 
+    def _validate_source(self, source: TemplateSource) -> None:
+        document = self._load(source)
+        if not list(iter_mcp_tools(document["definition"])):
+            return
+        if not source.mcp_server_url and source.mcp_config_path is None:
+            raise ValueError("mcp.server_url is required for an MCP template")
+        if source.mcp_server_url:
+            validate_https_url(source.mcp_server_url, "mcp.server_url")
+        if source.mcp_connection_id and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*", source.mcp_connection_id,
+        ):
+            raise ValueError("MCP connection ID has an invalid format")
+        if (
+            source.mcp_config_path
+            and source.mcp_config_path.is_file()
+            and not (
+                source.mcp_server_url
+                and (source.mcp_connection_id or source.connection_mode == "public")
+            )
+        ):
+            raise ValueError(
+                "mcp.config_file must define both "
+                "VOICE_AGENT_MCP_SERVER_URL and "
+                "VOICE_AGENT_MCP_CONNECTION_ID"
+            )
+
     def _load(self, source: TemplateSource) -> dict[str, Any]:
-        if source.id not in self._documents:
+        if source.path not in self._documents:
             document = json.loads(source.path.read_text(encoding="utf-8"))
-            if not isinstance(document.get("definition"), dict):
+            if not isinstance(document, dict) or not isinstance(document.get("definition"), dict):
                 raise RuntimeError(f"{source.path} has no definition object.")
-            self._documents[source.id] = document
-        return self._documents[source.id]
+            self._documents[source.path] = document
+        return self._documents[source.path]
 
     def cards(self) -> list[dict[str, Any]]:
-        cards = []
-        for source in self._sources:
-            document = self._load(source)
-            definition = document["definition"]
-            graph = graph_summary(definition)
-            mcp_tools = list(iter_mcp_tools(definition))
-            cards.append({
-                "id": source.id,
-                "name": source.name or str(document.get("name") or source.id),
-                "category": source.category,
-                "summary": source.summary or str(document.get("description") or "Voice Agent template."),
-                "accent": source.accent,
-                "accent_color": source.accent,
-                "tags": ["mcp", "voice-agent"] if mcp_tools else ["voice-agent"],
-                "featured": bool(mcp_tools),
-                "node_count": len(graph["nodes"]),
-                "edge_count": len(graph["edges"]),
-                "tool_count": len(mcp_tools),
-                "input_count": 0,
-                "error_count": 0,
-                "warning_count": 0,
-                "requires_mcp": bool(mcp_tools),
-            })
-        return cards
+        return [self._card(source) for source in self._sources]
 
-    def detail(self, template_id: str) -> dict[str, Any] | None:
-        source = self.source(template_id)
+    def _card(self, source: TemplateSource) -> dict[str, Any]:
+        document = self._load(source)
+        definition = document["definition"]
+        graph = graph_summary(definition)
+        mcp_tools = list(iter_mcp_tools(definition))
+        systems = [
+            {"id": group["id"], "label": group["label"], "connectable": group["connectable"]}
+            for group in tool_groups(definition)
+        ]
+        return {
+            "id": source.id,
+            "name": source.name or str(document.get("name") or source.id),
+            "category": source.category,
+            "summary": source.summary or str(document.get("description") or "Voice Agent template."),
+            "accent": source.accent,
+            "accent_color": source.accent,
+            "tags": ["mcp", "voice-agent"] if mcp_tools else ["voice-agent"],
+            "featured": bool(mcp_tools),
+            "node_count": len(graph["nodes"]),
+            "edge_count": len(graph["edges"]),
+            "tool_count": len(mcp_tools),
+            "input_count": 0,
+            "error_count": 0,
+            "warning_count": 0,
+            "requires_mcp": bool(mcp_tools),
+            "mock_tools": bool(systems),
+            "tool_systems": systems,
+            "default_version": ".",
+            "versions": [
+                {
+                    "id": version,
+                    "name": f"Default ({source.path.name})" if version == "." else version,
+                }
+                for version in self._versions[source.id]
+            ],
+        }
+
+    def detail(self, template_id: str, version: str = ".") -> dict[str, Any] | None:
+        source = self.source(template_id, version)
         if source is None:
             return None
         document = self._load(source)
@@ -675,9 +1005,9 @@ class TemplateCatalog:
         mcp_tools = list(iter_mcp_tools(definition))
         connection_configured = bool(
             source.mcp_server_url
-            and source.mcp_connection_id
+            and (source.mcp_connection_id or source.connection_mode == "public")
             and (
-                source.connection_mode == "existing"
+                source.connection_mode in {"existing", "public"}
                 or (
                     source.mcp_token_file
                     and source.mcp_token_file.is_file()
@@ -712,7 +1042,8 @@ class TemplateCatalog:
                     },
                 )
         return {
-            **next(card for card in self.cards() if card["id"] == template_id),
+            **self._card(source),
+            "version": version,
             "description": document.get("description") or source.summary,
             "model": definition.get("model") or "gpt-realtime",
             "voice": voice_name(definition),
@@ -764,12 +1095,12 @@ class TemplateCatalog:
             },
         }
 
-    def document(self, template_id: str) -> dict[str, Any] | None:
-        source = self.source(template_id)
+    def document(self, template_id: str, version: str = ".") -> dict[str, Any] | None:
+        source = self.source(template_id, version)
         return copy.deepcopy(self._load(source)) if source else None
 
-    def source(self, template_id: str) -> TemplateSource | None:
-        return next((item for item in self._sources if item.id == template_id), None)
+    def source(self, template_id: str, version: str = ".") -> TemplateSource | None:
+        return self._versions.get(template_id, {}).get(version)
 
 
 def voice_name(definition: dict[str, Any]) -> str:
@@ -904,8 +1235,12 @@ def publish_agent(
     name: str,
     description: str,
     definition: dict[str, Any],
+    metadata: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     preview_headers = {"Foundry-Features": FOUNDRY_FEATURES}
+    body: dict[str, Any] = {"definition": definition, "description": description}
+    if metadata:
+        body["metadata"] = metadata
     with AIProjectClient(
         endpoint=cfg.host,
         credential=cfg.credential(),
@@ -913,7 +1248,7 @@ def publish_agent(
     ) as client:
         created = client.agents.create_version(
             name,
-            {"definition": definition, "description": description},
+            body,
             headers=preview_headers,
         )
         client.agents.enable(name, headers=preview_headers)
@@ -971,6 +1306,53 @@ async def examples_guide(_: web.Request) -> web.FileResponse:
     return web.FileResponse(DOCS_DIR / "03_run_samples.md")
 
 
+async def real_tools_guide(_: web.Request) -> web.Response:
+    markdown = (DOCS_DIR / "05_connect_real_tools.md").read_text(encoding="utf-8")
+    return web.Response(text=render_page(markdown), content_type="text/html")
+
+
+TRY_TURNS_HEADING = "## Try these turns"
+
+
+def try_it_turns(readme: Path) -> list[str]:
+    """The bullets under a sample README's "Try these turns" heading, one string per turn."""
+    try:
+        lines = readme.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    turns: list[str] = []
+    inside = False
+    for line in lines:
+        if line.strip() == TRY_TURNS_HEADING:
+            inside = True
+            continue
+        if not inside:
+            continue
+        if line.startswith("## "):
+            break
+        if line.startswith("- "):
+            turns.append(line[2:].strip())
+        elif turns and line.startswith((" ", "\t")) and line.strip():
+            turns[-1] = f"{turns[-1]} {line.strip()}"
+    return [turn.replace("mock_tool_call_", "") for turn in turns]
+
+
+async def template_try_it(request: web.Request) -> web.Response:
+    """Sample turns and test data for a Template's mock tools, for the conversation page."""
+    source = _catalog(request).source(request.match_info["template_id"])
+    if source is None:
+        raise web.HTTPNotFound(text="Unknown template.")
+    turns = try_it_turns(source.path.parent / "README.md")
+    if not turns:
+        raise web.HTTPNotFound(text="This template has no sample turns.")
+    return web.json_response({"id": source.id, "name": source.name, "turns": turns})
+
+
+async def logic_apps_mcp_guide(_: web.Request) -> web.Response:
+    markdown = (DOCS_DIR / "06_logic_apps_mcp_servers.md").read_text(encoding="utf-8")
+    return web.Response(text=render_page(markdown), content_type="text/html")
+
+
 async def template_config(request: web.Request) -> web.Response:
     cfg = await _cfg(request)
     return web.json_response({
@@ -1018,10 +1400,12 @@ async def templates_env(request: web.Request) -> web.Response:
 async def get_template(request: web.Request) -> web.Response:
     catalog = _catalog(request)
     template_id = request.match_info["template_id"]
-    source = catalog.source(template_id)
-    detail = catalog.detail(template_id)
-    if source is None or detail is None:
-        raise web.HTTPNotFound(text="Unknown template.")
+    version = request.query.get("version", ".")
+    source = catalog.source(template_id, version)
+    detail = catalog.detail(template_id, version)
+    document = catalog.document(template_id, version)
+    if source is None or detail is None or document is None:
+        raise web.HTTPNotFound(text="Unknown template or version.")
     model_override = request.app[MODEL_OVERRIDE_KEY]
     if model_override and not source.lock_runtime:
         detail["model"] = model_override
@@ -1029,6 +1413,22 @@ async def get_template(request: web.Request) -> web.Response:
             for item in group["items"]:
                 if item["label"] == "Model":
                     item["value"] = model_override
+    definition = copy.deepcopy(document["definition"])
+    if model_override and not source.lock_runtime:
+        definition["model"] = model_override
+    for tool in iter_mcp_tools(definition):
+        if source.mcp_server_url:
+            tool["server_url"] = source.mcp_server_url
+        if source.mcp_connection_id:
+            tool["project_connection_id"] = source.mcp_connection_id
+        if source.connection_mode == "public":
+            tool.pop("project_connection_id", None)
+        tool.pop("authorization", None)
+        tool.pop("headers", None)
+    materialize_handoff_instruction_inheritance(definition)
+    detail["definition"] = definition
+    detail["yaml"] = json.dumps({**document, "definition": definition}, indent=2)
+    detail["suggested_agent_name"] = template_agent_name("", template_id)
     return web.json_response(detail)
 
 
@@ -1039,7 +1439,10 @@ def _probe_report(source: TemplateSource) -> dict[str, Any]:
         "server_url": source.mcp_server_url,
         "project_connection_id": source.mcp_connection_id,
         "guide_url": "/guide/run-samples",
-        "start_command": "cd VoiceAgent/shared_mcp && ./scripts/e2e-local.sh",
+        "start_command": (
+            "" if source.connection_mode == "public"
+            else "cd VoiceAgent/shared_mcp && ./scripts/e2e-local.sh"
+        ),
         "checked_at": time.strftime("%H:%M:%S", time.localtime()),
     }
 
@@ -1047,10 +1450,11 @@ def _probe_report(source: TemplateSource) -> dict[str, Any]:
 async def probe_template_mcp(request: web.Request) -> web.Response:
     catalog = _catalog(request)
     template_id = request.match_info["template_id"]
-    source = catalog.source(template_id)
-    document = catalog.document(template_id)
+    version = request.query.get("version", ".")
+    source = catalog.source(template_id, version)
+    document = catalog.document(template_id, version)
     if source is None or document is None:
-        raise web.HTTPNotFound(text="Unknown template.")
+        raise web.HTTPNotFound(text="Unknown template or version.")
     cfg = await _cfg(request)
     report = _probe_report(source)
     report["backend"] = cfg.backend
@@ -1060,7 +1464,7 @@ async def probe_template_mcp(request: web.Request) -> web.Response:
         return web.json_response({**report, "error": str(error)})
     if (
         not source.mcp_server_url
-        or not source.mcp_connection_id
+        or (not source.mcp_connection_id and source.connection_mode != "public")
         or (
             source.connection_mode == "managed"
             and (
@@ -1079,7 +1483,7 @@ async def probe_template_mcp(request: web.Request) -> web.Response:
     try:
         bearer_token = (
             ""
-            if source.connection_mode == "existing"
+            if source.connection_mode in {"existing", "public"}
             else normalize_bearer_token(
                 source.mcp_token_file.read_text(encoding="utf-8")
             )
@@ -1253,67 +1657,213 @@ async def probe_published_mcp(request: web.Request) -> web.Response:
     })
 
 
-async def reject_browser_mcp_token(_: web.Request) -> web.Response:
-    raise web.HTTPConflict(
-        text=(
-            "Portal Templates use the managed Local Dev Tunnel connection; "
-            "browser-provided MCP tokens are disabled."
+async def ensure_template_mcp_connection(
+    cfg: AgentsConfig,
+    source: TemplateSource,
+    definition: dict[str, Any],
+) -> str:
+    if not list(iter_mcp_tools(definition)):
+        return ""
+    if source.connection_mode == "public":
+        validate_mcp_probe_url(source.mcp_server_url)
+        return ""
+    if (
+        not source.mcp_server_url
+        or not source.mcp_connection_id
+        or (
+            source.connection_mode == "managed"
+            and (
+                source.mcp_token_file is None
+                or not source.mcp_token_file.is_file()
+            )
         )
+    ):
+        raise ValueError(
+            "The local MCP config is not ready. Run "
+            "VoiceAgent/shared_mcp/scripts/e2e-local.sh and reload templates."
+        )
+    if source.connection_mode == "managed":
+        assert source.mcp_token_file is not None
+        bearer_token = normalize_bearer_token(
+            source.mcp_token_file.read_text(encoding="utf-8")
+        )
+        validate_mcp_probe_url(source.mcp_server_url)
+        await asyncio.to_thread(
+            create_mcp_connection,
+            cfg,
+            connection_name=source.mcp_connection_id,
+            server_url=source.mcp_server_url,
+            bearer_token=bearer_token,
+        )
+    return source.mcp_connection_id
+
+
+async def configure_template_mcp(request: web.Request) -> web.Response:
+    raw_body = await request.read()
+    if raw_body:
+        try:
+            body = json.loads(raw_body)
+        except json.JSONDecodeError as error:
+            raise web.HTTPBadRequest(text="Expected a JSON object.") from error
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="Expected a JSON object.")
+        if "token" in body:
+            raise web.HTTPConflict(
+                text=(
+                    "Portal Templates use server-configured MCP settings; "
+                    "browser-provided MCP tokens are disabled."
+                )
+            )
+        if body:
+            raise web.HTTPBadRequest(
+                text="Client-provided MCP configuration is not supported."
+            )
+
+    cfg = await _cfg(request)
+    template_id = request.match_info["template_id"]
+    catalog = _catalog(request)
+    version = request.query.get("version", ".")
+    document = catalog.document(template_id, version)
+    source = catalog.source(template_id, version)
+    if document is None or source is None:
+        raise web.HTTPNotFound(text="Unknown template or version.")
+    try:
+        require_template_backend(source, cfg.backend)
+        connection_name = await ensure_template_mcp_connection(
+            cfg,
+            source,
+            document["definition"],
+        )
+    except ValueError as error:
+        raise web.HTTPBadRequest(text=str(error)) from error
+    except Exception as error:
+        return web.json_response(
+            {"error": f"{type(error).__name__}: {error}."},
+            status=502,
+        )
+    return web.json_response({
+        "configured": bool(connection_name or source.connection_mode == "public"),
+        "connection_name": connection_name,
+        "backend": cfg.backend,
+    })
+
+
+async def custom_server_tools(server_url: str) -> tuple[str, list[str]]:
+    """Validate a user's public MCP URL and list its tools without credentials."""
+    url = validate_https_url(server_url, "MCP server URL")
+    try:
+        result = await asyncio.to_thread(mcp_handshake, url)
+    except McpProbeError as error:
+        raise ValueError(f"The MCP server could not be reached: {error}") from error
+    return url, list(result["tools"])
+
+
+def catalog_mock_url(catalog: TemplateCatalog) -> str:
+    """The mock-tool-call server URL that the catalog's mock-tool Templates use."""
+    for card in catalog.cards():
+        source = catalog.source(card["id"])
+        if source and source.connection_mode == "public" and source.mcp_server_url.endswith(MOCK_ROUTE_SUFFIX):
+            return source.mcp_server_url
+    return ""
+
+
+async def _tool_request(request: web.Request) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Read a working definition and one of its systems from a tool-connection request."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as error:
+        raise web.HTTPBadRequest(text="Expected a JSON object.") from error
+    if not isinstance(body, dict) or not isinstance(body.get("definition"), dict):
+        raise web.HTTPBadRequest(text="Expected a JSON object with a definition.")
+    definition = body["definition"]
+    groups = {group["id"]: group for group in definition_tool_groups(definition)}
+    group = groups.get(str(body.get("group") or ""))
+    if group is None:
+        raise web.HTTPBadRequest(text="The definition has no tools for that system.")
+    return body, definition, group
+
+
+async def list_definition_tool_groups(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as error:
+        raise web.HTTPBadRequest(text="Expected a JSON object.") from error
+    if not isinstance(body, dict) or not isinstance(body.get("definition"), dict):
+        raise web.HTTPBadRequest(text="Expected a JSON object with a definition.")
+    return web.json_response({"groups": definition_tool_groups(body["definition"])})
+
+
+async def discover_definition_tools(request: web.Request) -> web.Response:
+    body, _, group = await _tool_request(request)
+    if not group["connectable"] or not group["tools"]:
+        return web.json_response({"ok": False, "error": f"{group['label']} cannot be connected here."})
+    try:
+        url, tools = await custom_server_tools(str(body.get("server_url") or ""))
+    except ValueError as error:
+        return web.json_response({"ok": False, "error": str(error)})
+    mapping = suggest_tool_map(group["tools"], tools)
+    return web.json_response({
+        "ok": True,
+        "group": group["id"],
+        "server_url": url,
+        "tools": tools,
+        "required": group["tools"],
+        "mapping": mapping,
+        "unmapped": [name for name in group["tools"] if not mapping[name]],
+    })
+
+
+async def connect_definition_tools(request: web.Request) -> web.Response:
+    body, definition, group = await _tool_request(request)
+    if not group["connectable"] or not group["tools"]:
+        raise web.HTTPBadRequest(text=f"{group['label']} cannot be connected here.")
+    try:
+        url, tools = await custom_server_tools(str(body.get("server_url") or ""))
+        tool_map = validate_tool_map(group["tools"], tools, body.get("tool_map"))
+    except ValueError as error:
+        raise web.HTTPBadRequest(text=str(error)) from error
+    updated = apply_tool_servers(definition, {group["id"]: (url, tool_map)})
+    return web.json_response({
+        "definition": updated,
+        "tool_map": tool_map,
+        "groups": definition_tool_groups(updated),
+    })
+
+
+async def disconnect_definition_tools(request: web.Request) -> web.Response:
+    body, definition, group = await _tool_request(request)
+    tool_map = body.get("tool_map")
+    if not group["connected"] or not isinstance(tool_map, dict):
+        raise web.HTTPBadRequest(text=f"{group['label']} is not connected to your server.")
+    mock_url = catalog_mock_url(_catalog(request))
+    if not mock_url:
+        raise web.HTTPBadRequest(text="No mock tool server is configured.")
+    updated = revert_tool_server(
+        definition, group["id"], {str(key): str(value) for key, value in tool_map.items()}, mock_url,
     )
+    return web.json_response({"definition": updated, "groups": definition_tool_groups(updated)})
 
 
 async def publish_template(request: web.Request) -> web.Response:
     cfg = await _cfg(request)
     template_id = request.match_info["template_id"]
     catalog = _catalog(request)
-    document = catalog.document(template_id)
-    source = catalog.source(template_id)
+    version = request.query.get("version", ".")
+    document = catalog.document(template_id, version)
+    source = catalog.source(template_id, version)
     if document is None or source is None:
-        raise web.HTTPNotFound(text="Unknown template.")
+        raise web.HTTPNotFound(text="Unknown template or version.")
     try:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("Expected a JSON object.")
         name = template_agent_name(str(body.get("name") or ""), template_id)
         require_template_backend(source, cfg.backend)
-        mcp_tools = list(iter_mcp_tools(document["definition"]))
-        connection_name = ""
-        if mcp_tools:
-            if (
-                not source.mcp_server_url
-                or not source.mcp_connection_id
-                or (
-                    source.connection_mode == "managed"
-                    and (
-                        source.mcp_token_file is None
-                        or not source.mcp_token_file.is_file()
-                    )
-                )
-            ):
-                raise ValueError(
-                    "The local MCP config is not ready. Run "
-                    "VoiceAgent/shared_mcp/scripts/e2e-local.sh and reload templates."
-                )
-            connection_name = source.mcp_connection_id
-            bearer_token = (
-                normalize_bearer_token(
-                    source.mcp_token_file.read_text(encoding="utf-8")
-                )
-                if (
-                    source.connection_mode == "managed"
-                    and source.mcp_token_file is not None
-                )
-                else ""
-            )
-            validate_mcp_probe_url(source.mcp_server_url)
-            if source.connection_mode == "managed":
-                await asyncio.to_thread(
-                    create_mcp_connection,
-                    cfg,
-                    connection_name=connection_name,
-                    server_url=source.mcp_server_url,
-                    bearer_token=bearer_token,
-                )
+        connection_name = await ensure_template_mcp_connection(
+            cfg,
+            source,
+            document["definition"],
+        )
         definition = materialize_template(
             document,
             model=(
@@ -1324,11 +1874,13 @@ async def publish_template(request: web.Request) -> web.Response:
             voice="" if source.lock_runtime else str(body.get("voice") or ""),
             mcp_server_url=source.mcp_server_url,
             mcp_connection_id=connection_name,
+            mcp_public=source.connection_mode == "public",
         )
         result = await asyncio.to_thread(
             publish_agent,
             cfg,
             name=name,
+            metadata={"source_template_id": template_id, "source_template_version": version},
             description=str(document.get("description") or ""),
             definition=definition,
         )
@@ -1344,6 +1896,7 @@ async def publish_template(request: web.Request) -> web.Response:
         "agent_name": result["name"],
         "backend": cfg.project,
         "source_agent_name": str(document.get("name") or template_id),
+        "source_template_version": version,
         "mcp_connection_name": connection_name,
     }, status=201)
 
@@ -1363,17 +1916,24 @@ def install_template_routes(
     app.router.add_get("/templates", templates_index)
     app.router.add_get("/templates/", templates_index)
     app.router.add_get("/guide/run-samples", examples_guide)
+    app.router.add_get("/guide/real-tools", real_tools_guide)
+    app.router.add_get("/guide/logic-apps-mcp", logic_apps_mcp_guide)
     app.router.add_get("/api/config", template_config)
     app.router.add_get("/api/templates", list_templates)
     app.router.add_get("/api/templates/env", templates_env)
     app.router.add_get("/api/templates/{template_id}", get_template)
+    app.router.add_get("/api/templates/{template_id}/try-it", template_try_it)
     app.router.add_get(
         "/api/templates/{template_id}/mcp/probe",
         probe_template_mcp,
     )
     app.router.add_post(
         "/api/templates/{template_id}/mcp/configure",
-        reject_browser_mcp_token,
+        configure_template_mcp,
     )
+    app.router.add_post("/api/tools/groups", list_definition_tool_groups)
+    app.router.add_post("/api/tools/discover", discover_definition_tools)
+    app.router.add_post("/api/tools/connect", connect_definition_tools)
+    app.router.add_post("/api/tools/disconnect", disconnect_definition_tools)
     app.router.add_post("/api/templates/{template_id}/publish", publish_template)
     app.router.add_get("/static/{asset}", template_asset)

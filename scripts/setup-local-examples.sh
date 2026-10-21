@@ -4,33 +4,31 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCP_ROOT="${ROOT}/shared_mcp"
 SAMPLES_ROOT="${ROOT}/samples"
-HANDOFF_ROOT="${SAMPLES_ROOT}/example1_finance_with_handoff"
+HANDOFF_ROOT="${SAMPLES_ROOT}/example1_finance_with_handoff_realtime"
+CASCADE_ROOT="${SAMPLES_ROOT}/example1_finance_with_handoff_cascade"
 OTP_ROOT="${SAMPLES_ROOT}/example2_finance_with_OTP_and_Officer_Search"
 ELEVATOR_ROOT="${SAMPLES_ROOT}/example3_elevator_service_with_safety_zendesk_and_handoff"
-UI_ROOT="${ROOT}/portal"
-UI_WEB_ROOT="${UI_ROOT}/web"
 MCP_LOCAL_STATE_ROOT="${ROOT}/shared_mcp/state/local"
 TUNNEL_ID_FILE="${MCP_LOCAL_STATE_ROOT}/devtunnel-id"
-LOCAL_TOOLS_ROOT="${ROOT}/.local-mcp-and-ui/tools"
-LOCAL_NODE_ROOT="${LOCAL_TOOLS_ROOT}/node"
+LOCAL_TOOLS_ROOT="${ROOT}/.local-tools"
 LOCAL_DEVTUNNEL_ROOT="${LOCAL_TOOLS_ROOT}/devtunnel"
 PYTHON_BOOTSTRAP_ROOT="${LOCAL_TOOLS_ROOT}/python-bootstrap"
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
 PROJECT_ENDPOINT="${AZURE_AI_PROJECT_ENDPOINT:-}"
 CHECK_ONLY=0
 
-export PATH="${LOCAL_NODE_ROOT}/bin:${LOCAL_DEVTUNNEL_ROOT}/bin:${HOME}/bin:${PATH}"
+export PATH="${LOCAL_DEVTUNNEL_ROOT}/bin:${HOME}/bin:${PATH}"
 
 usage() {
   cat <<'EOF'
 Usage: ./scripts/setup-local-examples.sh [options]
 
-Prepare the configured Voice Agent sample CLIs and portal on one development
-machine: check required tools, install dependencies, build the browser bundle,
-create or update local .env files, and initialize its fixed Dev Tunnel ID.
+Prepare the configured Voice Agent sample CLIs on one development machine:
+check required tools, install dependencies, create or update local .env files,
+and initialize the fixed Dev Tunnel ID.
 The local MCP setup uses native Python and does not require or inspect Docker.
-Missing Node.js 22 and Dev Tunnel CLIs are installed under the ignored
-.local-mcp-and-ui/tools directory; system-wide installation is not required.
+The missing Dev Tunnel CLI is installed under the ignored `.local-tools`
+directory; system-wide installation is not required.
 
 Options:
   --project-endpoint URL  Write the Foundry Project endpoint to new local .env files.
@@ -106,65 +104,6 @@ if sys.version_info < (3, 10):
 print(f"python={sys.version.split()[0]}")
 PY
   echo "azure_cli=$(az version --query '"azure-cli"' --output tsv)"
-}
-
-node_is_ready() {
-  local major=""
-  command -v node >/dev/null 2>&1 || return 1
-  command -v npm >/dev/null 2>&1 || return 1
-  major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
-  [[ "${major}" =~ ^[0-9]+$ && "${major}" -ge 22 ]]
-}
-
-install_local_node() {
-  local download_root=""
-  local filename=""
-  local expected_sha=""
-  local actual_sha=""
-
-  download_root="$(mktemp -d "${LOCAL_TOOLS_ROOT}/node-download.XXXXXX")"
-  curl --proto '=https' --tlsv1.2 -fsSL \
-    https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt \
-    -o "${download_root}/SHASUMS256.txt"
-  filename="$(
-    awk '$2 ~ /^node-v22\.[0-9]+\.[0-9]+-linux-x64\.tar\.xz$/ {print $2; exit}' \
-      "${download_root}/SHASUMS256.txt"
-  )"
-  [[ -n "${filename}" ]] || die "could not resolve the latest Node.js 22 Linux x64 archive"
-  expected_sha="$(
-    awk -v filename="${filename}" '$2 == filename {print $1}' \
-      "${download_root}/SHASUMS256.txt"
-  )"
-  curl --proto '=https' --tlsv1.2 -fsSL \
-    "https://nodejs.org/dist/latest-v22.x/${filename}" \
-    -o "${download_root}/${filename}"
-  actual_sha="$(sha256sum "${download_root}/${filename}" | awk '{print $1}')"
-  [[ "${actual_sha}" == "${expected_sha}" ]] ||
-    die "Node.js archive checksum verification failed"
-
-  rm -rf "${LOCAL_NODE_ROOT}.new"
-  tar -xJf "${download_root}/${filename}" -C "${download_root}"
-  mv "${download_root}/${filename%.tar.xz}" "${LOCAL_NODE_ROOT}.new"
-  rm -rf "${LOCAL_NODE_ROOT}"
-  mv "${LOCAL_NODE_ROOT}.new" "${LOCAL_NODE_ROOT}"
-  rm -rf "${download_root}"
-  hash -r
-}
-
-ensure_node() {
-  mkdir -p "${LOCAL_TOOLS_ROOT}"
-  if node_is_ready; then
-    echo "node=$(node --version)"
-    echo "npm=$(npm --version)"
-    return 0
-  fi
-  [[ "${CHECK_ONLY}" == "0" ]] ||
-    die "Node.js 22+ and npm are missing. Run setup without --check to install them locally."
-
-  install_local_node
-  node_is_ready || die "Node.js was installed locally but is not usable"
-  echo "node=$(node --version) source=repo-local"
-  echo "npm=$(npm --version)"
 }
 
 ensure_devtunnel() {
@@ -378,7 +317,11 @@ check_installed_environments() {
     "import mcp, redis, uvicorn" || failed=1
   check_python_environment \
     "${HANDOFF_ROOT}/.venv/bin/python" \
-    "finance-handoff" \
+    "finance-handoff-realtime" \
+    "import azure.ai.projects, azure.identity, dotenv, websockets" || failed=1
+  check_python_environment \
+    "${CASCADE_ROOT}/.venv/bin/python" \
+    "finance-handoff-cascade" \
     "import azure.ai.projects, azure.identity, dotenv, websockets" || failed=1
   check_python_environment \
     "${OTP_ROOT}/.venv/bin/python" \
@@ -388,22 +331,6 @@ check_installed_environments() {
     "${ELEVATOR_ROOT}/.venv/bin/python" \
     "elevator-service" \
     "import azure.ai.projects, azure.identity, dotenv, websockets" || failed=1
-  check_python_environment \
-    "${UI_ROOT}/.venv/bin/python" \
-    "portal" \
-    "import aiohttp, azure.ai.projects, azure.identity, dotenv, requests, websockets" || failed=1
-  if [[ ! -d "${UI_WEB_ROOT}/node_modules" ]]; then
-    echo "ACTION_REQUIRED: run npm ci in ${UI_WEB_ROOT}" >&2
-    failed=1
-  else
-    echo "node_environment=portal ready"
-  fi
-  if [[ ! -s "${UI_ROOT}/static/bundle.js" ]]; then
-    echo "ACTION_REQUIRED: build the portal browser bundle" >&2
-    failed=1
-  else
-    echo "browser_bundle=ready"
-  fi
   return "${failed}"
 }
 
@@ -442,7 +369,6 @@ PY
 }
 
 check_base_tools
-ensure_node
 ensure_devtunnel
 
 missing_config=0
@@ -452,17 +378,17 @@ ensure_tunnel_id || missing_config=1
 
 if [[ "${CHECK_ONLY}" == "0" ]]; then
   install_python_environment "${MCP_ROOT}" "shared-mcp-native"
-  install_python_environment "${HANDOFF_ROOT}" "finance-handoff"
+  install_python_environment "${HANDOFF_ROOT}" "finance-handoff-realtime"
+  install_python_environment "${CASCADE_ROOT}" "finance-handoff-cascade"
   install_python_environment "${OTP_ROOT}" "finance-otp-officer"
   install_python_environment "${ELEVATOR_ROOT}" "elevator-service"
-  install_python_environment "${UI_ROOT}" "portal"
-
-  npm --prefix "${UI_WEB_ROOT}" ci
-  npm --prefix "${UI_WEB_ROOT}" test
-  npm --prefix "${UI_WEB_ROOT}" run build:all
 
   ensure_env_file \
     "${HANDOFF_ROOT}" \
+    "" \
+    "../../shared_mcp/config/generated/example1.local.env"
+  ensure_env_file \
+    "${CASCADE_ROOT}" \
     "" \
     "../../shared_mcp/config/generated/example1.local.env"
   ensure_env_file \
@@ -473,19 +399,18 @@ if [[ "${CHECK_ONLY}" == "0" ]]; then
     "${ELEVATOR_ROOT}" \
     "" \
     "../../shared_mcp/config/generated/example3.local.env"
-  ensure_env_file "${UI_ROOT}" "18098" "" "AZURE_VOICE_AGENTS_ENDPOINT"
 fi
 
 check_installed_environments || missing_config=1
 check_env_file "${HANDOFF_ROOT}/.env" || { missing_endpoint=1; missing_config=1; }
+check_env_file "${CASCADE_ROOT}/.env" || { missing_endpoint=1; missing_config=1; }
 check_env_file "${OTP_ROOT}/.env" || { missing_endpoint=1; missing_config=1; }
 check_env_file "${ELEVATOR_ROOT}/.env" || { missing_endpoint=1; missing_config=1; }
-check_env_file "${UI_ROOT}/.env" || { missing_endpoint=1; missing_config=1; }
 check_authentication || { missing_auth=1; missing_config=1; }
 
 if [[ "${missing_config}" == "0" ]]; then
   echo "local_setup=ready"
-  echo "next=${ROOT}/scripts/manage-local-mcp-and-ui.sh restart"
+  echo "next_cli_mcp=cd ${MCP_ROOT} && ./scripts/e2e-local.sh"
 else
   echo "local_setup=installed configuration=required"
   if [[ "${missing_endpoint}" == "1" ]]; then

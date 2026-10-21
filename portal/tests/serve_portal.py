@@ -8,10 +8,12 @@ The UI has no special test mode and never receives offline protocol flags.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -22,6 +24,7 @@ os.environ["PYTHON_DOTENV_DISABLED"] = "1"
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import demo_server as portal
+import template_portal
 
 ENDPOINT = "https://sample.services.ai.azure.com/api/projects/sample-project"
 TOKEN = "integration-fixture-token"
@@ -153,6 +156,7 @@ async def create_test_app():
     patches = (
         patch.object(portal, "_forward_to_service", http_boundary),
         patch.object(portal, "ProjectWebSocketConnect", ws_boundary),
+        patch.object(template_portal, "create_mcp_connection"),
     )
     for item in patches:
         item.start()
@@ -160,15 +164,43 @@ async def create_test_app():
         "--project-endpoint", ENDPOINT, "--no-record-sessions",
     ]))
     app[portal.DEFAULT_CONFIG_KEY]._credential = FixtureCredential()
+    mcp_files = tempfile.TemporaryDirectory(prefix="voice-portal-browser-mcp-")
+    token_file = Path(mcp_files.name) / "token"
+    token_file.write_text("synthetic-browser-mcp-token\n", encoding="utf-8")
+    catalog = app[template_portal.CATALOG_KEY]
+    original_source = catalog.source
+
+    def template_source(template_id, version="."):
+        source = original_source(template_id, version)
+        if source is None:
+            return None
+        return replace(
+            source,
+            mcp_server_url=f"https://example.com/mcp/{template_id}",
+            mcp_connection_id=f"fixture-{template_id}",
+            mcp_token_file=token_file,
+            mcp_config_path=None,
+            connection_mode="managed",
+            allowed_backends=(),
+        )
+
+    source_patch = patch.object(catalog, "source", side_effect=template_source)
+    source_patch.start()
 
     async def cleanup(_app):
+        source_patch.stop()
         for item in patches:
             item.stop()
         await upstream.close()
+        mcp_files.cleanup()
 
     app.on_cleanup.append(cleanup)
     return app
 
 
 if __name__ == "__main__":
-    web.run_app(create_test_app(), host="127.0.0.1", port=8097, print=None, access_log=None)
+    web.run_app(
+        create_test_app(), host="127.0.0.1",
+        port=int(os.getenv("VOICE_PORTAL_TEST_PORT", "8097")),
+        print=None, access_log=None,
+    )

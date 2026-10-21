@@ -143,7 +143,6 @@ export class AudioHandler {
         if (this.sharedReferenceSource) {
           this.sharedReferenceSource.connect(this.workletNode, 0, 1);
         }
-        this.nextPlayTime = this.context.currentTime;
       })();
       this.recordingPromise = recordingPromise;
     }
@@ -206,21 +205,36 @@ export class AudioHandler {
 
   // Barge-in: stop + flush every scheduled audio source so the agent goes silent at once.
   stopStreamingPlayback() {
-    this.isPlaying = false;
     this.lastScheduledSpeechEndAtMs = null;
+    this._stopPlaybackSources(() => true);
+  }
+
+  stopResponsePlayback(responseId) {
+    this._stopPlaybackSources((src) => src.responseId === responseId);
+  }
+
+  _stopPlaybackSources(shouldStop) {
+    const retained = [];
     this.playbackQueue.forEach((src) => {
+      if (!shouldStop(src)) {
+        retained.push(src);
+        return;
+      }
       try { src.onended = null; } catch { /* noop */ }
       try { src.disconnect(); } catch { /* noop */ }
       try { src.stop(); } catch { /* noop */ }
     });
-    this.playbackQueue = [];
-    if (this.context) this.nextPlayTime = this.context.currentTime;
+    this.playbackQueue = retained;
+    if (this.context) {
+      this.nextPlayTime = Math.max(this.context.currentTime, ...retained.map((src) => src.playbackEndTime));
+    }
+    this.lastScheduledSpeechEndAtMs = retained.at(-1)?.speechEndAtMs ?? null;
     this._resolvePlaybackWaiters();
   }
 
   // Schedule one PCM16 chunk (Uint8Array) for gapless playback. When a speech
   // offset is supplied, return its estimated monotonic playback time.
-  playChunk(chunk, speechOffsetMs = null, speechEndOffsetMs = null) {
+  playChunk(chunk, speechOffsetMs = null, speechEndOffsetMs = null, responseId = null) {
     if (!this.context) return null;
     const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
     if (int16.length === 0) return null;
@@ -248,6 +262,9 @@ export class AudioHandler {
     }
     src.start(chunkStartTime);
     this.nextPlayTime += buffer.duration;
+    src.responseId = responseId;
+    src.playbackEndTime = this.nextPlayTime;
+    src.speechEndAtMs = this.lastScheduledSpeechEndAtMs;
     this.playbackQueue.push(src);
     src.onended = () => {
       const i = this.playbackQueue.indexOf(src);

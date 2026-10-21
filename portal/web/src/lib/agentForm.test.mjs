@@ -11,6 +11,10 @@ const cfg = {
   defaultModel: "gpt-realtime",
   defaultVoice: "en-US-AvaNeural",
   defaultAzureVoice: "en-US-AvaNeural",
+  inputTranscriptionModel: "azure-speech",
+  transcriptionModels: ["azure-speech", "mai-transcribe-2", "whisper-1"],
+  realtimeTranscriptionModels: ["azure-speech", "mai-transcribe-2", "whisper-1"],
+  cascadedTranscriptionModels: ["azure-speech", "mai-transcribe-2"],
   realtimeModels: ["gpt-realtime"],
   cascadedModels: ["gpt-4.1"],
   byomRealtimeModels: ["my-realtime"],
@@ -30,6 +34,7 @@ test("editor defaults preserve the existing managed voice request", () => {
   assert.equal(request.definition.kind, "voice");
   assert.equal(request.definition.model_type, "managed");
   assert.equal(request.definition.model, cfg.defaultModel);
+  assert.equal(request.definition.audio.input.transcription.model, "azure-speech");
   assert.equal(request.definition.instructions, DEFAULT_INSTRUCTIONS);
   assert.equal(request.definition.store, true);
   assert.deepEqual(request.definition.audio.input.echo_cancellation, {
@@ -68,7 +73,27 @@ test("changing models with an avatar keeps an Azure voice", () => {
   const draft = updateAgentDraft(cfg, createAgentDraft(cfg), "avatarEnabled", true);
   const next = updateAgentDraft({ ...cfg, defaultAzureVoice: "", defaultVoice: "alloy", azureVoices: ["en-US-JennyNeural"] },
     draft, "model", "gpt-realtime");
-  assert.equal(next.voice, "en-US-JennyNeural");
+  assert.equal(next.voice, "en-US-AvaNeural");
+});
+
+test("changing model families keeps STT only when the next model supports it", () => {
+  const realtime = { ...createAgentDraft(cfg), transcriptionModel: "whisper-1" };
+  const cascaded = updateAgentDraft(cfg, realtime, "model", "gpt-4.1");
+  assert.equal(cascaded.transcriptionModel, "azure-speech");
+  assert.equal(body(cascaded).definition.audio.input.transcription.model, "azure-speech");
+  const restored = updateAgentDraft(cfg, cascaded, "model", "gpt-realtime");
+  assert.equal(restored.transcriptionModel, "azure-speech");
+});
+
+test("changing model families preserves transcription and voice when both remain compatible", () => {
+  const realtime = {
+    ...createAgentDraft(cfg),
+    transcriptionModel: "mai-transcribe-2",
+    voice: "en-US-AvaNeural",
+  };
+  const cascaded = updateAgentDraft(cfg, realtime, "model", "gpt-4.1");
+  assert.equal(cascaded.transcriptionModel, "mai-transcribe-2");
+  assert.equal(cascaded.voice, "en-US-AvaNeural");
 });
 
 test("hosted wrappers exclude target-owned fields without destroying local selections", () => {

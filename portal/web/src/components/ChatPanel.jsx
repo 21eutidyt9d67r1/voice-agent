@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble.jsx";
 import { Icon } from "./ConfigControls.jsx";
+import { MockTryItPanel } from "./MockTryItPanel.jsx";
 
 function AvatarStage({ stream, status }) {
   const videoRef = useRef(null);
@@ -136,7 +137,8 @@ function Timeline({ messages, events, filter, showEvents, onApproval, listRef, o
           </div> : null}
           <div className="timeline-message">
             {row.message ? (
-              <MessageBubble message={row.message} allMessages={messages} onApproval={onApproval} />
+              <MessageBubble message={row.message} allMessages={messages}
+                debugMode={showEvents} onApproval={onApproval} />
             ) : null}
           </div>
         </div>
@@ -252,6 +254,8 @@ export function ChatPanel({ session, agent, cfg }) {
           </button>
         </div>
       </div>
+
+      <MockTryItPanel agent={agent} />
 
       {verbose ? <div className="event-controls">
         <input className="event-filter" aria-label="Filter protocol frames" placeholder="Filter frames…"

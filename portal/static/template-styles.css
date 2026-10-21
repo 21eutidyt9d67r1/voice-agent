@@ -184,6 +184,8 @@ html, body {
 .tab.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
 
 .tab-body { flex: 1; min-height: 0; position: relative; }
+.template-version-field { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.template-version-field select { min-width: 0; max-width: 100%; flex: 1; padding: 6px; font: inherit; }
 .tab-panel { display: none; position: absolute; inset: 0; overflow: auto; padding: 14px; }
 .tab-panel.active { display: block; }
 
@@ -403,6 +405,7 @@ code { background: var(--line-soft); padding: 1px 5px; border-radius: 3px; font-
   background: #fff8e8;
   color: #724700;
 }
+.mcp-start-guide[hidden] { display: none; }
 .mcp-start-guide strong {
   font-size: 12px;
   letter-spacing: .01em;

@@ -8,7 +8,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { loadConfig } from "../config.js";
-import { loadVoiceAgents } from "../lib/agentCatalog.mjs";
+import {
+  asVoiceAgent,
+  loadVoiceAgent,
+  loadVoiceAgentPage,
+} from "../lib/agentCatalog.mjs";
 import { useVoiceSession } from "../hooks/useVoiceSession.js";
 import { AgentPicker } from "./components/AgentPicker.jsx";
 import { LiveStage } from "./components/LiveStage.jsx";
@@ -18,7 +22,13 @@ export function WebRtcApp() {
   const [cfg, setCfg] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [agents, setAgents] = useState([]);
-  const [agentsState, setAgentsState] = useState({ loading: true, error: "" });
+  const [agentsState, setAgentsState] = useState({
+    loading: true,
+    loadingMore: false,
+    error: "",
+    hasMore: false,
+    nextCursor: "",
+  });
   const [agent, setAgent] = useState(null);
   const [phase, setPhase] = useState("setup"); // "setup" | "live" | "review"
   const [reviewConversationId, setReviewConversationId] = useState(null);
@@ -28,15 +38,77 @@ export function WebRtcApp() {
     loadConfig()
       .then(async (loaded) => {
         try {
-          setAgents(await loadVoiceAgents(loaded));
-          setAgentsState({ loading: false, error: "" });
+          const page = await loadVoiceAgentPage(loaded);
+          setAgents(page.agents);
+          setAgentsState({
+            loading: false,
+            loadingMore: false,
+            error: "",
+            hasMore: page.hasMore,
+            nextCursor: page.nextCursor,
+          });
         } catch (e) {
-          setAgentsState({ loading: false, error: String(e) });
+          setAgentsState({
+            loading: false,
+            loadingMore: false,
+            error: String(e),
+            hasMore: false,
+            nextCursor: "",
+          });
         }
         setCfg(loaded);
       })
       .catch((e) => setLoadError(String(e)));
   }, []);
+
+  const loadMoreAgents = useCallback(async () => {
+    if (
+      agentsState.loading
+      || agentsState.loadingMore
+      || !agentsState.hasMore
+      || !agentsState.nextCursor
+    ) return;
+
+    setAgentsState((current) => ({ ...current, loadingMore: true, error: "" }));
+    try {
+      const page = await loadVoiceAgentPage(cfg, { after: agentsState.nextCursor });
+      setAgents((current) => {
+        const known = new Set(current.map((item) => item.name));
+        return [...current, ...page.agents.filter((item) => !known.has(item.name))];
+      });
+      setAgentsState({
+        loading: false,
+        loadingMore: false,
+        error: "",
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      });
+    } catch (e) {
+      setAgentsState((current) => ({
+        ...current,
+        loadingMore: false,
+        error: String(e),
+      }));
+    }
+  }, [cfg, agentsState]);
+
+  const resolveAgent = useCallback(async (name) => {
+    const requested = String(name || "").trim();
+    if (!requested) throw new Error("Enter an exact Agent name");
+
+    let selected = agents.find((item) => item.name === requested)
+      || agents.find((item) => item.name.toLocaleLowerCase() === requested.toLocaleLowerCase())
+      || null;
+    if (!selected) {
+      selected = asVoiceAgent(await loadVoiceAgent(cfg, requested));
+      if (!selected) throw new Error(`Agent '${requested}' is not a Voice Agent`);
+      setAgents((current) => [
+        selected,
+        ...current.filter((item) => item.name !== selected.name),
+      ]);
+    }
+    return selected;
+  }, [agents, cfg]);
 
   const start = useCallback((selected) => {
     if (!selected) return;
@@ -76,11 +148,17 @@ export function WebRtcApp() {
           </span>
         </div>
       </header>
-      <p className="info-note">{cfg.notice} <a href="/">Return to studio</a></p>
+      <p className="info-note">{cfg.notice} <a href="/demo/">Return to studio</a></p>
 
       <main className="wrtc-body">
         {phase === "setup" ? (
-          <AgentPicker agents={agents} state={agentsState} onStart={start} />
+          <AgentPicker
+            agents={agents}
+            state={agentsState}
+            onLoadMore={loadMoreAgents}
+            onResolveAgent={resolveAgent}
+            onStart={start}
+          />
         ) : null}
         {phase === "live" ? (
           <LiveStage session={session} agent={agent} onEnd={end} />
@@ -90,6 +168,7 @@ export function WebRtcApp() {
             cfg={cfg}
             agent={agent}
             conversationId={reviewConversationId}
+            debugMode={session.verbose}
             onRestart={restart}
           />
         ) : null}

@@ -2,8 +2,9 @@
 name: debug-local-session
 description: >-
   Debug the customer Voice Agent sample stack across local setup, Foundry Project and
-  model deployment, Agent publication/version, RemoteTool connection, shared
-  MCP deployment/routes, portal bridge, and recorded sessions. Use for setup
+  model deployment, Agent publication/version, the Portal's public no-auth MCP,
+  customer-owned RemoteTool connections, shared MCP deployment/routes, portal
+  bridge, and recorded sessions. Use for setup
   failures, wrong Project/model, publish errors, disabled Try it now, MCP auth
   or tool failures, handoff aborts, silence, unexpected close, missing
   recordings, or any run/session/Voice Live/Foundry ID. Correlate local stack
@@ -30,30 +31,31 @@ endpoint.
 2. Check local process boundaries:
 
    ```bash
-   ./scripts/manage-local-mcp-and-ui.sh status
+   curl -fsS http://127.0.0.1:9527/healthz
+   # Only for a CLI sample using the customer-owned local MCP:
    curl -fsS http://127.0.0.1:18003/healthz
-   curl -fsS http://127.0.0.1:18098/healthz
    ```
 
-  Read `.local-mcp-and-ui/mcp.log` and
-  `.local-mcp-and-ui/portal.log` when a process is not ready. For requests
-  that reached the native MCP runtime, read the `native-mcp.log` under the
-  newest `shared_mcp/state/e2e/<UTC-run>/` directory; the manager log contains
-  startup output but is not the authoritative HTTP access log.
+  Read the Portal terminal output and its configured data directory when the
+  UI is not ready. For requests that reached the native MCP runtime, read the
+  `native-mcp.log` under the newest
+  `shared_mcp/state/e2e/<UTC-run>/` directory.
 
 3. If setup, publication, or **Try it now** fails before a recording exists:
    - Run `./scripts/setup-local-examples.sh --check`.
-   - Confirm all three `.env` files select the intended Project.
+   - Confirm the relevant CLI sample `.env` files and `portal/.env` select the
+     intended Project.
    - Confirm `model_type` and `model` identify an available model deployment
      in the account that owns that Project; a deployment in a sibling account
      is not automatically visible.
-   - Inspect `shared_mcp/config/generated/example*.local.env`; never print
-     `shared_mcp/state/local/token`.
-   - Call both portal template probe endpoints. An MCP is ready only after
-     authenticated HTTP 200 `initialize` and `tools/list` with all expected
-     Agent tools.
-   - Verify the selected Project contains the referenced RemoteTool connection
-     before changing prompts or business logic.
+   - For a CLI-created Agent, inspect
+     `shared_mcp/config/generated/example*.local.env`; never print
+     `shared_mcp/state/local/token`, and verify the selected Project contains
+     the referenced RemoteTool connection.
+   - For a Portal Template, call its probe endpoint. The public no-auth MCP is
+     ready only after HTTP 200 `initialize` and `tools/list` with all expected
+     Agent tools. Its published definition must not contain
+     `project_connection_id`.
 
 4. If a recording exists, determine the actual data directory.
    - Prefer `--data-dir` from the running `demo_server.py` command.
@@ -62,18 +64,6 @@ endpoint.
     `<portal-process-HOME>` comes from `/proc/<portal-pid>/environ`; do not
     substitute the portal working directory.
    - Do not assume the current shell user started the UI.
-
-   For the manager-owned portal, resolve only the allowed fields without
-   printing its complete environment:
-
-   ```bash
-   portal_pid="$(<.local-mcp-and-ui/portal.pid)"
-   tr '\0' '\n' < "/proc/${portal_pid}/environ" |
-     sed -n '/^HOME=/p;/^VOICE_PORTAL_DATA_DIR=/p;/^VOICE_PORTAL_RECORD_SESSIONS=/p'
-   ```
-
-   If `VOICE_PORTAL_DATA_DIR` is unset, use the reported `HOME` plus
-   `/.voice-agent-portal`.
 
 5. Resolve the recording with the bundled analyzer:
 
@@ -132,7 +122,7 @@ Streamable HTTP, while Foundry RemoteTool can use legacy HTTP+SSE against the
 same route.
 
 1. Get the failed handoff timestamp and target node from `events.jsonl`.
-2. Find the active native MCP artifact from the manager log or the newest
+2. Find the active native MCP artifact from the newest
    `shared_mcp/state/e2e/<UTC-run>/native-mcp.log`.
 3. Match Foundry requests by timestamp and public client address. A successful
    legacy sequence is:
@@ -155,8 +145,9 @@ same route.
    - `CallToolRequest` with a business error: transport succeeded; debug the
      tool implementation and state.
 
-Never print `shared_mcp/state/local/token`. Use the Portal probe for the
-Streamable HTTP control and the native access log for the Foundry transport.
+Never print `shared_mcp/state/local/token`. Use the E2E probe output for the
+customer-owned Streamable HTTP control and the native access log for the
+Foundry transport.
 
 ## Evidence quality rules
 

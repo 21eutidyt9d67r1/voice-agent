@@ -48,7 +48,7 @@ done
 SHARED_MCP_TOKEN="${TOKEN}" PYTHONPATH="${ROOT}/app" \
   python3 -m shared_mcp.probe \
     --url "${BASE_URL}/mcp/finance-handoff" \
-    --agent-json "${ROOT}/../samples/example1_finance_with_handoff/agent.json"
+    --agent-json "${ROOT}/../samples/example1_finance_with_handoff_realtime/agent.json"
 SHARED_MCP_TOKEN="${TOKEN}" PYTHONPATH="${ROOT}/app" \
   python3 -m shared_mcp.probe \
     --url "${BASE_URL}/mcp/finance-otp-officer" \

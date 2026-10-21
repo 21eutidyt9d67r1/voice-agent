@@ -511,7 +511,8 @@ Continue in exactly one scenario README:
 
 - [02: MCP settings, deployment, and development](./02_mcp_settings.md)
 - [03: Start and run the samples](./03_run_samples.md)
-- [Example 1: Finance with Handoff](../samples/example1_finance_with_handoff/README.md)
+- [Example 1: Finance with Handoff - Realtime](../samples/example1_finance_with_handoff_realtime/README.md)
+- [Example 1: Finance with Handoff - Cascade](../samples/example1_finance_with_handoff_cascade/README.md)
 - [Example 2: Finance with OTP and Officer Search](../samples/example2_finance_with_OTP_and_Officer_Search/README.md)
 - [Voice Agent portal](../portal/README.md)
 - [Finance examples architecture and documentation index](./README.md)

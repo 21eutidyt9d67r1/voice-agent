@@ -1,0 +1,240 @@
+{
+  "models": {
+    "azure-realtime": {
+      "available": true
+    },
+    "gpt-5.4": {
+      "available": true
+    },
+    "gpt-5.6-luna": {
+      "available": true
+    },
+    "gpt-5.6-terra": {
+      "available": true
+    },
+    "gpt-6-luna": {
+      "available": true
+    },
+    "gpt-6-sol": {
+      "available": true
+    },
+    "gpt-6.1-sol": {
+      "available": true
+    },
+    "gpt-oss-120b": {
+      "available": true
+    },
+    "gpt-realtime": {
+      "available": true
+    },
+    "gpt-realtime-1.5": {
+      "available": true
+    },
+    "gpt-realtime-2": {
+      "available": false,
+      "reason": "publish HTTP 400: { \"error\": { \"code\": \"bad_request\", \"message\": \"Model 'gpt-realtime-2' is not supported in managed mode in this region. Choose a supported managed model or use self-deployed mode.\", \"type\": \"invalid_request_error\", \"detail"
+    },
+    "gpt-realtime-2.1": {
+      "available": true
+    },
+    "gpt-realtime-2.1-mini": {
+      "available": true
+    },
+    "gpt-realtime-mini": {
+      "available": true
+    }
+  },
+  "probed_at": "2026-10-21T09:46:34+00:00",
+  "project": "voice-agent-portal-l3hddama@voice-agent-playground",
+  "schema_version": 1,
+  "stt": {
+    "azure-speech": {
+      "available": true,
+      "transcript": "Hello!"
+    },
+    "gpt-4o-mini-transcribe": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "gpt-4o-transcribe": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "gpt-4o-transcribe-diarize": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "gpt-live-transcribe": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "gpt-realtime-whisper": {
+      "available": true,
+      "transcript": "Hello"
+    },
+    "gpt-transcribe": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "mai-transcribe": {
+      "available": true,
+      "transcript": "Hello?"
+    },
+    "mai-transcribe-2": {
+      "available": true,
+      "transcript": "Hello?"
+    },
+    "mai-transcribe-2-streaming": {
+      "available": true,
+      "transcript": "Hello."
+    },
+    "native-realtime-audio": {
+      "available": false,
+      "reason": "service error: {\"message\": \"'session.audio.input.transcription.model' should be 'whisper-1', 'gpt-4o-transcribe', 'gpt-4o-mini-transcribe', 'gpt-4o-transcribe-diarize', 'gpt-transcribe', 'gpt-live-transcribe', 'gpt-realtime-whisper', 'azure"
+    },
+    "whisper-1": {
+      "available": true,
+      "transcript": "Hello."
+    }
+  },
+  "voices": {
+    "aarti": {
+      "available": true
+    },
+    "alloy": {
+      "available": true
+    },
+    "alvaro": {
+      "available": true
+    },
+    "andrew": {
+      "available": true
+    },
+    "antonio": {
+      "available": true
+    },
+    "ash": {
+      "available": true
+    },
+    "ava": {
+      "available": true
+    },
+    "ballad": {
+      "available": true
+    },
+    "cedar": {
+      "available": true
+    },
+    "clara": {
+      "available": true
+    },
+    "coral": {
+      "available": true
+    },
+    "dalia": {
+      "available": true
+    },
+    "denise": {
+      "available": true
+    },
+    "diego": {
+      "available": true
+    },
+    "diya": {
+      "available": true
+    },
+    "echo": {
+      "available": true
+    },
+    "elsa": {
+      "available": true
+    },
+    "emma": {
+      "available": true
+    },
+    "en-IN-Diya:DragonHDLatestNeural": {
+      "available": true
+    },
+    "en-US-Ava:DragonHDLatestNeural": {
+      "available": true
+    },
+    "florian": {
+      "available": true
+    },
+    "francisca": {
+      "available": true
+    },
+    "hyunsu": {
+      "available": true
+    },
+    "jorge": {
+      "available": true
+    },
+    "keita": {
+      "available": true
+    },
+    "liam": {
+      "available": true
+    },
+    "marin": {
+      "available": true
+    },
+    "meera": {
+      "available": true
+    },
+    "nanami": {
+      "available": true
+    },
+    "natasha": {
+      "available": true
+    },
+    "niwat": {
+      "available": true
+    },
+    "premwadee": {
+      "available": true
+    },
+    "remy": {
+      "available": true
+    },
+    "ryan": {
+      "available": true
+    },
+    "sage": {
+      "available": true
+    },
+    "seraphina": {
+      "available": true
+    },
+    "shimmer": {
+      "available": true
+    },
+    "sonia": {
+      "available": true
+    },
+    "sunhi": {
+      "available": true
+    },
+    "sylvie": {
+      "available": true
+    },
+    "thierry": {
+      "available": true
+    },
+    "verse": {
+      "available": true
+    },
+    "william": {
+      "available": true
+    },
+    "xiaoxiao": {
+      "available": true
+    },
+    "ximena": {
+      "available": true
+    },
+    "yunxi": {
+      "available": true
+    }
+  }
+}

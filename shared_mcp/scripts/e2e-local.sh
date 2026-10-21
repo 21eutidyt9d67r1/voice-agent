@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SAMPLES_ROOT="$(cd "${ROOT}/../samples" && pwd)"
-HANDOFF_SAMPLE="${SAMPLES_ROOT}/example1_finance_with_handoff"
+HANDOFF_SAMPLE="${SAMPLES_ROOT}/example1_finance_with_handoff_realtime"
 OTP_SAMPLE="${SAMPLES_ROOT}/example2_finance_with_OTP_and_Officer_Search"
 ELEVATOR_SAMPLE="${SAMPLES_ROOT}/example3_elevator_service_with_safety_zendesk_and_handoff"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"

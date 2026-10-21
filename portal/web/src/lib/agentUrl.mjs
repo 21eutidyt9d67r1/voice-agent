@@ -7,3 +7,12 @@ export function withSelectedAgent(href, agentName) {
   else url.searchParams.delete("agent");
   return url.toString();
 }
+
+export function withSessionTransport(href, transport) {
+  if (transport !== "websocket" && transport !== "webrtc") {
+    throw new Error('Transport must be "websocket" or "webrtc".');
+  }
+  const url = new URL(href);
+  url.searchParams.set("transport", transport);
+  return url.toString();
+}

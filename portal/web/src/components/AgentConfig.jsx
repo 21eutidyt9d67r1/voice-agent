@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft. All rights reserved.
 
-import { isCascaded, modelGroups, voiceGroups } from "../config.js";
+import { isCascaded, modelGroups, transcriptionGroups, voiceGroups } from "../config.js";
 import { AVATAR_PRESETS } from "../lib/avatar.mjs";
 import { DEFAULT_INSTRUCTIONS } from "../lib/agentForm.mjs";
 import { LIMITS } from "../lib/authoringContract.mjs";
@@ -146,16 +146,43 @@ export function AgentConfig({ cfg, draft, update, disabled, structuredInputConfi
 
 export function VoiceConfig({ cfg, draft, update, disabled }) {
   const hosted = draft.inferenceMode === "hosted_agent";
-  const azureOnly = hosted || draft.avatarEnabled || isCascaded(cfg, draft.model);
+  const cascaded = hosted || isCascaded(cfg, draft.model);
+  const azureOnly = cascaded || draft.avatarEnabled;
   return (
     <>
-      <SectionHeading title="Voice & audio" description="Choose how your agent sounds and configure its audio." />
-      <Field label="Voice" hint={azureOnly
-        ? "Azure voices are required for this configuration."
-        : "Choose a native realtime voice or an Azure voice."}>
-        <GroupedSelect value={draft.voice} groups={voiceGroups(cfg, azureOnly)} disabled={disabled}
-          onChange={(event) => update("voice", event.target.value)} />
-      </Field>
+      <SectionHeading title="Speech input & output"
+        description="Configure transcription and spoken output separately. STT never selects a voice." />
+      <div className="speech-direction-card input">
+        <div className="speech-direction-heading">
+          <span className="speech-direction-arrow" aria-hidden="true">Caller →</span>
+          <div><strong>Input transcription (STT)</strong><small>Speech becomes a transcript</small></div>
+        </div>
+        <Field label="Transcription model" hint={cascaded
+          ? "This STT output is the text consumed by the cascaded model."
+          : "The Realtime model understands audio directly; this selection still produces transcript events."}>
+          <GroupedSelect value={draft.transcriptionModel}
+            groups={transcriptionGroups(cfg, draft.model, hosted)} disabled={disabled}
+            onChange={(event) => update("transcriptionModel", event.target.value)} />
+        </Field>
+      </div>
+      <div className="speech-direction-card output">
+        <div className="speech-direction-heading">
+          <span className="speech-direction-arrow" aria-hidden="true">Agent →</span>
+          <div><strong>Speech output (TTS / voice)</strong><small>The reply becomes audio</small></div>
+        </div>
+        <Field label="Output voice" hint={azureOnly
+          ? "This model, avatar, or wrapper requires an Azure Speech voice. Incompatible native voices remain visible but disabled."
+          : "GPT Realtime supports either an OpenAI native voice or an Azure Speech voice."}>
+          <GroupedSelect value={draft.voice} groups={voiceGroups(cfg, azureOnly)} disabled={disabled}
+            onChange={(event) => update("voice", event.target.value)} />
+        </Field>
+      </div>
+      <div className={`audio-compatibility-note ${cascaded ? "cascaded" : "realtime"}`}>
+        <strong>{cascaded ? "Cascaded pipeline" : "Realtime audio pipeline"}</strong>
+        <span>{cascaded
+          ? "STT feeds text to the model. Spoken output uses Azure Speech."
+          : "The model reads caller audio natively. STT runs alongside it for transcripts; voice controls output only."}</span>
+      </div>
       <div className="audio-format-note"><span>24 kHz PCM</span><span>Server VAD</span><span>Audio response</span></div>
       <div className="setting-block">
         <Toggle label="Live-reference echo cancellation" checked={draft.clientReferenceEc}

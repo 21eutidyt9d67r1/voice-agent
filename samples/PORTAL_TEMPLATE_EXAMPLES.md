@@ -10,16 +10,14 @@ Every new example intended for the portal **must** follow this contract:
    `VoiceAgent/portal/templates.config.json`;
 3. keep MCP credentials out of source and choose one supported connection
    mode;
-4. add catalog and behavior tests before treating the example as supported;
-5. update source-sync mappings when the example is imported from an upstream
-   repository.
+4. add catalog and behavior tests before treating the example as supported.
 
-All examples shipped in this repository must use `connection_mode: managed`
-with the repository-owned `VoiceAgent/shared_mcp` runtime. They must work when
-the customer selects a newly created Foundry Project: the Portal creates or
-updates the required RemoteTool connection during publication. A checked-in
-example must never name a connection that is assumed to exist in a Microsoft
-test Project.
+Default examples use `connection_mode: public` with the public no-auth MCP
+configured in `portal/templates.config.json`. They work in a newly created
+Foundry Project without local files, bearer tokens, or Project connections.
+The business-pack reference implementation remains in this repository's
+`shared_mcp` directory. A checked-in example must never assume that a
+connection already exists in a Microsoft test Project.
 
 The portal does not scan `samples/` automatically. A directory that is not
 allowlisted in `portal/templates.config.json` is not a portal Template.
@@ -103,17 +101,16 @@ Edit `VoiceAgent/portal/templates.config.json`:
 
 ```json
 {
-  "id": "finance-example",
-  "folder": "../samples/example1_finance_with_handoff",
-  "name": "Example 1: Finance with Handoff",
+  "id": "finance-example-realtime",
+  "folder": "../samples/example1_finance_with_handoff_realtime",
+  "name": "Example 1: Finance with Handoff - Realtime",
   "category": "Financial services",
   "summary": "A short customer-facing summary.",
   "accent_color": "#147d64",
   "mcp": {
-    "connection_mode": "managed",
-    "config_file": "../shared_mcp/config/generated/example1.local.env",
-    "token_file": "../shared_mcp/state/local/token",
-    "source_label": "Local shared_mcp Dev Tunnel",
+    "connection_mode": "public",
+    "server_url": "https://voice-agent-noauth-mcp.lemonsky-36682081.westus2.azurecontainerapps.io/mcp/finance-handoff",
+    "source_label": "Public no-auth MCP",
     "source_reference": "VoiceAgent/shared_mcp"
   }
 }
@@ -137,9 +134,29 @@ Field rules:
 The portal reload button re-reads both this allowlist and every enabled
 `agent.json`.
 
+### Keep experimental versions separate from the default
+
+Keep the intended default in the sample root's `agent.json`. The existing
+Version selector discovers matching filenames recursively, so a snapshot can
+use `backups/<timestamp>/original/agent.json` and
+`backups/<timestamp>/revised/agent.json` without another catalog entry.
+Record file SHA-256, provenance and validation limitations in a manifest;
+backup availability does not imply acceptance. Keep all snapshots portable and
+credential-free. Realtime and Cascade Finance use separate sample directories
+so one runtime's backup cannot be selected by the other's card.
+
 ## 4. Choose the MCP connection mode
 
-### `managed` — default local development mode
+### `public` — default Template mode
+
+Use a public HTTPS `server_url` with no `connection_id`, `config_file`, or
+`token_file`. Readiness must complete unauthenticated `initialize` and
+`tools/list`, including every declared tool; HTTP 401/403 is a failure.
+Publishing writes the URL to every MCP tool, including handoff nodes, and
+removes `project_connection_id`, `authorization`, and `headers`.
+No Foundry Project connection is created.
+
+### `managed` — customer-owned MCP mode
 
 Use this for examples backed by this repository's native `shared_mcp` runtime
 and Dev Tunnel.
@@ -158,7 +175,8 @@ and Dev Tunnel.
 - Agents published through this mode receive the `local-only-` prefix because
   they depend on this machine's native MCP process and Dev Tunnel.
 
-Add a new MCP-backed example to `shared_mcp` before allowlisting it:
+When an example introduces a new business pack implemented in this repository,
+add it to `shared_mcp` before allowlisting it:
 
 1. create or extend a business pack under `shared_mcp/app/shared_mcp/`;
 2. register an isolated route in `shared_mcp/server.py`;
@@ -166,6 +184,12 @@ Add a new MCP-backed example to `shared_mcp` before allowlisting it:
    `shared_mcp/scripts/e2e-local.sh`;
 4. generate a non-secret route config under `shared_mcp/config/generated/`;
 5. add route inventory and authenticated probe tests.
+
+An example may instead reuse an existing external hosted MCP contract, as the
+[Front Desk sample](example4_frontdesk_with_fluency_and_handoff/README.md) does.
+Keep its Agent definition portable, identify that external source accurately in
+the catalog, verify the exact tool inventory, and document service limitations.
+Do not add a duplicate business implementation to Portal hosting infrastructure.
 
 ### `existing` — framework capability, not for checked-in examples
 
@@ -219,22 +243,18 @@ If the example adds an MCP route, update
 
 ## 7. Validate the complete workflow
 
-From `VoiceAgent/`:
-
-```bash
-./scripts/setup-local-examples.sh --check
-./scripts/manage-local-mcp-and-ui.sh restart
-```
-
-The default MCP runtime is native Python plus Dev Tunnel; Docker is optional.
+Start the local Portal as described in its [README](../portal/README.md); the
+default Templates need no Dev Tunnel or local MCP process. Validate changes to
+the customer-owned `shared_mcp` implementation independently with the commands
+in its [README](../shared_mcp/README.md).
 
 Verify catalog and detail:
 
 ```bash
-curl -fsS http://127.0.0.1:18098/api/templates?reload=1
-curl -fsS http://127.0.0.1:18098/api/templates/<template-id>
+curl -fsS http://127.0.0.1:9527/api/templates?reload=1
+curl -fsS http://127.0.0.1:9527/api/templates/<template-id>
 curl -fsS \
-  http://127.0.0.1:18098/api/templates/<template-id>/mcp/probe
+  http://127.0.0.1:9527/api/templates/<template-id>/mcp/probe
 ```
 
 Run regressions:
@@ -252,29 +272,15 @@ npm run test:local
 
 For an MCP-backed example, the workflow is not complete until:
 
-- local and public `/healthz` return HTTP 200;
-- unauthenticated MCP returns HTTP 401;
-- authenticated `initialize` and `tools/list` succeed;
+- public MCP `/healthz` returns HTTP 200;
+- default public `initialize` and `tools/list` succeed without Authorization;
+- for a customer-owned `managed` configuration, unauthenticated MCP returns
+  HTTP 401 and authenticated `initialize` and `tools/list` succeed;
 - every declared `allowed_tools` item exists;
-- the selected Foundry Project connection targets the expected route;
+- every published MCP tool targets the expected route; public mode has no
+  Project connection, while managed mode has the selected Project connection;
 - Template publish creates a `local-only-*` Agent;
 - that Agent opens in Live session and can execute its business flow.
-
-## 8. Update source synchronization when applicable
-
-If the example is imported from `voice-first-agent-dev` or another maintained
-source repository:
-
-1. add its source root and destination to
-   `VoiceAgent/portal/SOURCE_SYNC.json`;
-2. mark byte-identical files `exact` and policy-adjusted files `adapted`;
-3. run `portal/tools/source_sync_status.py` against the candidate commit;
-4. require zero unmapped source changes and zero exact mapping drift;
-5. advance the accepted source baseline only after the port and all tests pass.
-
-Do not add unrelated demos, media, or repository-wide files to the sync roots.
-If an example is authored directly in this repository, no source-sync mapping
-is required.
 
 ## Completion checklist
 
@@ -283,7 +289,6 @@ is required.
 - [ ] Explicit `portal/templates.config.json` allowlist entry
 - [ ] MCP route/config/token policy selected and documented
 - [ ] Catalog, route, browser, and MCP inventory tests updated
-- [ ] Source-sync mappings updated when applicable
 - [ ] Portal Reload shows the new Template with no catalog errors
 - [ ] MCP readiness and tool inventory pass
 - [ ] `local-only-*` Agent publishes and runs successfully

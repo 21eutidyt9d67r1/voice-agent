@@ -20,12 +20,13 @@ import { definitionFromResponse, shouldApplyGenerateResponse } from "./lib/agent
 import {
   asVoiceAgent,
   hostedAgentTargetPath,
-  loadVoiceAgents,
+  loadVoiceAgent,
+  loadVoiceAgentPage,
   validateHostedAgentTarget,
 } from "./lib/agentCatalog.mjs";
 import { useVoiceSession } from "./hooks/useVoiceSession.js";
 import { buildHandoffGraph } from "./lib/handoffGraph.mjs";
-import { withSelectedAgent } from "./lib/agentUrl.mjs";
+import { withSelectedAgent, withSessionTransport } from "./lib/agentUrl.mjs";
 import { AgentDefinitionDialog } from "./components/AgentDefinitionDialog.jsx";
 import { Icon } from "./components/ConfigControls.jsx";
 import { Sidebar, MODE_CREATE, MODE_GENERATE } from "./components/Sidebar.jsx";
@@ -34,6 +35,10 @@ import { ChatPanel } from "./components/ChatPanel.jsx";
 import { HandoffGraphPanel } from "./components/HandoffGraphPanel.jsx";
 import { SessionControls } from "./components/SessionControls.jsx";
 import { StudioHeader } from "./components/StudioHeader.jsx";
+
+const WORKSPACE_MIN_SIDE_WIDTH = 360;
+const WORKSPACE_MIN_PLAYGROUND_WIDTH = 320;
+const WORKSPACE_SPLITTER_WIDTH = 14;
 
 function forPortal(cfg, agent, sessionStores) {
   return agent ? {
@@ -44,16 +49,45 @@ function forPortal(cfg, agent, sessionStores) {
   } : null;
 }
 
+function mergeAgentLists(...lists) {
+  const merged = new Map();
+  for (const list of lists) {
+    for (const item of list) {
+      if (item && !merged.has(item.name)) merged.set(item.name, item);
+    }
+  }
+  return [...merged.values()];
+}
+
 export function App() {
+  const showRuntimeGraph = new URLSearchParams(window.location.search).get("view") === "handoff";
   const [cfg, setCfg] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [agent, setAgent] = useState(null); // { name, model, voice, cascaded }
+  const [transport, setTransport] = useState(
+    () => new URLSearchParams(window.location.search).get("transport") ?? "websocket",
+  );
+  const [transportNotice, setTransportNotice] = useState("");
+  const transportError = transport === "websocket" || transport === "webrtc"
+    ? ""
+    : `Unsupported transport '${transport}'. Choose WebSocket or WebRTC in Session settings.`;
   const [agents, setAgents] = useState([]);
-  const [agentListState, setAgentListState] = useState({ loading: true, error: "" });
+  const [agentListState, setAgentListState] = useState({
+    loading: true,
+    loadingMore: false,
+    error: "",
+    hasMore: false,
+    nextCursor: "",
+  });
   const [editingAgentName, setEditingAgentName] = useState("");
   const [authorMode, setAuthorMode] = useState(MODE_CREATE);
-  const [configurationCollapsed, setConfigurationCollapsed] = useState(false);
-  const [debugCollapsed, setDebugCollapsed] = useState(true);
+  const [configurationCollapsed, setConfigurationCollapsed] = useState(showRuntimeGraph);
+  const [debugCollapsed, setDebugCollapsed] = useState(!showRuntimeGraph);
+  const [sideColumnWidth, setSideColumnWidth] = useState(window.innerWidth / 2);
+  const [resizingWorkspace, setResizingWorkspace] = useState(false);
+  const shellRef = useRef(null);
+  const splitDragRef = useRef(null);
+  const workspaceResizedRef = useRef(false);
   // What the last generate returned, kept so the review stage has something
   // to show. Cleared when the caller switches away from generating, because a
   // definition left on screen would describe an agent they are no longer making.
@@ -69,6 +103,103 @@ export function App() {
   const { setClientFunctions } = session;
   const connectedRef = useRef(session.isConnected);
   connectedRef.current = session.isConnected;
+  const editorRunHandled = useRef(false);
+
+  useEffect(() => {
+    if (!agent?.clientReferenceEc) {
+      setTransportNotice("");
+      return;
+    }
+    if (transport !== "webrtc") return;
+    setTransport("websocket");
+    setTransportNotice("Transport changed to WebSocket: live-reference echo cancellation requires WebSocket.");
+    window.history.replaceState(
+      window.history.state, "", withSessionTransport(window.location.href, "websocket"),
+    );
+  }, [agent?.clientReferenceEc, transport]);
+
+  const onTransportChange = (value) => {
+    window.history.replaceState(
+      window.history.state, "", withSessionTransport(window.location.href, value),
+    );
+    setTransport(value);
+    setTransportNotice("");
+  };
+
+  const sideWidthBounds = () => {
+    const shell = shellRef.current;
+    const shellWidth = shell?.clientWidth || window.innerWidth;
+    const shellStyle = shell ? window.getComputedStyle(shell) : null;
+    const horizontalPadding = shellStyle
+      ? Number.parseFloat(shellStyle.paddingLeft) + Number.parseFloat(shellStyle.paddingRight)
+      : 0;
+    return {
+      min: WORKSPACE_MIN_SIDE_WIDTH,
+      balanced: (shellWidth - horizontalPadding - WORKSPACE_SPLITTER_WIDTH) / 2,
+      max: Math.max(
+        WORKSPACE_MIN_SIDE_WIDTH,
+        shellWidth - horizontalPadding - WORKSPACE_MIN_PLAYGROUND_WIDTH - WORKSPACE_SPLITTER_WIDTH,
+      ),
+    };
+  };
+
+  const clampSideColumnWidth = (value) => {
+    const { min, max } = sideWidthBounds();
+    return Math.min(max, Math.max(min, value));
+  };
+
+  const setClampedSideColumnWidth = (value) => {
+    setSideColumnWidth((current) => clampSideColumnWidth(
+      typeof value === "function" ? value(current) : value,
+    ));
+  };
+
+  const startWorkspaceResize = (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    splitDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: sideColumnWidth,
+    };
+    setResizingWorkspace(true);
+  };
+
+  const moveWorkspaceResize = (event) => {
+    const drag = splitDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.clientX !== drag.startX) workspaceResizedRef.current = true;
+    setClampedSideColumnWidth(drag.startWidth + event.clientX - drag.startX);
+  };
+
+  const finishWorkspaceResize = (event) => {
+    const drag = splitDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    splitDragRef.current = null;
+    setResizingWorkspace(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const resizeWorkspaceWithKeyboard = (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") {
+      resetWorkspaceSplit();
+      return;
+    }
+    workspaceResizedRef.current = true;
+    setClampedSideColumnWidth(
+      (current) => current + (event.key === "ArrowRight" ? 32 : -32),
+    );
+  };
+
+  const resetWorkspaceSplit = () => {
+    workspaceResizedRef.current = false;
+    setClampedSideColumnWidth(sideWidthBounds().balanced);
+  };
 
   const toggleConfigurationPanel = () => {
     if (configurationCollapsed) {
@@ -94,6 +225,20 @@ export function App() {
       setDebugCollapsed(false);
     }
   }, [session.isConnected]);
+
+  useEffect(() => {
+    if (!cfg || !shellRef.current) return undefined;
+    const fitWorkspace = () => {
+      const { min, max, balanced } = sideWidthBounds();
+      setSideColumnWidth((current) => Math.min(
+        max, Math.max(min, workspaceResizedRef.current ? current : balanced),
+      ));
+    };
+    const observer = new ResizeObserver(fitWorkspace);
+    observer.observe(shellRef.current);
+    fitWorkspace();
+    return () => observer.disconnect();
+  }, [cfg]);
 
   /* Client-executed `function` tools are fulfilled by this page, not by Voice Live, so the
    * handlers have to be installed before a session can call one. The digit-accuracy demo is the
@@ -130,23 +275,50 @@ export function App() {
           console.warn("BYOM deployment discovery failed; using static /config lists", e);
         }
         try {
-          const listed = await loadVoiceAgents(cfg);
-          const portalAgents = listed.map((item) => forPortal(cfg, item, generatedSessionStores.current));
-          setAgents(portalAgents);
-          // The Templates tab runs a template by opening this page with the agent it was
-          // published as, so an agent named in the URL is a selection, not a filter.
+          const page = await loadVoiceAgentPage(cfg);
+          let portalAgents = page.agents.map(
+            (item) => forPortal(cfg, item, generatedSessionStores.current),
+          );
+          // Template publishing opens AgentRuntime with the new agent selected, so an
+          // agent named in the URL is a selection, not a filter.
           const requested = new URLSearchParams(window.location.search).get("agent");
+          let selected = portalAgents[0] || null;
           if (requested) {
-            const match = portalAgents.find((item) => item.name === requested);
-            if (match) setAgent(match);
-            else session.logError(`Agent '${requested}' is not in backend '${cfg.backend}'`);
-          } else if (portalAgents.length) {
-            setAgent(portalAgents[0]);
+            selected = portalAgents.find((item) => item.name === requested) || null;
+            if (!selected) {
+              try {
+                selected = forPortal(
+                  cfg,
+                  asVoiceAgent(await loadVoiceAgent(cfg, requested)),
+                  generatedSessionStores.current,
+                );
+                if (selected) portalAgents = mergeAgentLists([selected], portalAgents);
+              } catch (error) {
+                console.warn(`Could not load requested agent '${requested}'`, error);
+              }
+            }
+            if (!selected) {
+              session.logError(`Agent '${requested}' is not in backend '${cfg.backend}'`);
+            }
           }
-          setAgentListState({ loading: false, error: "" });
+          setAgents(portalAgents);
+          setAgent(selected);
+          setAgentListState({
+            loading: false,
+            loadingMore: false,
+            error: "",
+            hasMore: page.hasMore,
+            nextCursor: page.nextCursor,
+          });
         } catch (e) {
           console.warn("Voice agent discovery failed", e);
-          setAgentListState({ loading: false, error: String(e) });
+          setAgentListState({
+            loading: false,
+            loadingMore: false,
+            error: String(e),
+            hasMore: false,
+            nextCursor: "",
+          });
         }
         setCfg(cfg);
       })
@@ -175,34 +347,148 @@ export function App() {
     if (!keepReview) setGenerated(null);
   };
 
-  const onSelectAgent = (name) => {
-    const selected = agents.find((item) => item.name === name) || null;
+  const onSelectAgent = async (name) => {
+    const requested = String(name || "").trim();
+    if (!requested) {
+      setAgent(null);
+      window.history.replaceState(null, "", withSelectedAgent(window.location.href));
+      setGenerated(null);
+      return "";
+    }
+
+    let selected = agents.find((item) => item.name === requested)
+      || agents.find((item) => item.name.toLocaleLowerCase() === requested.toLocaleLowerCase())
+      || null;
+    if (!selected) {
+      const resource = await loadVoiceAgent(cfg, requested);
+      selected = forPortal(
+        cfg,
+        asVoiceAgent(resource),
+        generatedSessionStores.current,
+      );
+      if (!selected) {
+        throw new Error(`Agent '${requested}' is not a Voice Agent`);
+      }
+      setAgents((current) => mergeAgentLists([selected], current));
+    }
+
     setAgent(selected);
-    window.history.replaceState(null, "", withSelectedAgent(window.location.href, selected?.name));
+    window.history.replaceState(null, "", withSelectedAgent(window.location.href, selected.name));
     setGenerated(null);
+    return selected.name;
   };
 
   const onRefreshAgents = async () => {
-    setAgentListState({ loading: true, error: "" });
+    const selectedName = agent?.name || "";
+    setAgentListState({
+      loading: true,
+      loadingMore: false,
+      error: "",
+      hasMore: false,
+      nextCursor: "",
+    });
     try {
-      const listed = (await loadVoiceAgents(cfg)).map((item) => forPortal(cfg, item, generatedSessionStores.current));
+      const page = await loadVoiceAgentPage(cfg);
+      let listed = page.agents.map(
+        (item) => forPortal(cfg, item, generatedSessionStores.current),
+      );
+      let selected = selectedName
+        ? listed.find((item) => item.name === selectedName) || null
+        : null;
+      if (selectedName && !selected) {
+        try {
+          selected = forPortal(
+            cfg,
+            asVoiceAgent(await loadVoiceAgent(cfg, selectedName)),
+            generatedSessionStores.current,
+          );
+          if (selected) listed = mergeAgentLists([selected], listed);
+        } catch (error) {
+          console.warn(`Previously selected agent '${selectedName}' is no longer available`, error);
+        }
+      }
       setAgents(listed);
-      setAgent((current) => (
-        current ? listed.find((item) => item.name === current.name) || null : null
-      ));
-      setAgentListState({ loading: false, error: "" });
+      setAgent(selected);
+      setAgentListState({
+        loading: false,
+        loadingMore: false,
+        error: "",
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      });
     } catch (e) {
-      setAgentListState({ loading: false, error: String(e) });
+      setAgentListState({
+        loading: false,
+        loadingMore: false,
+        error: String(e),
+        hasMore: false,
+        nextCursor: "",
+      });
     }
   };
 
-  // Agent URLs select only. Starting a credentialed/microphone session always
-  // requires the local operator to press Connect; ignore legacy autostart links.
+  const onLoadMoreAgents = async () => {
+    if (
+      agentListState.loading
+      || agentListState.loadingMore
+      || !agentListState.hasMore
+      || !agentListState.nextCursor
+    ) return;
+
+    setAgentListState((current) => ({ ...current, loadingMore: true, error: "" }));
+    try {
+      const page = await loadVoiceAgentPage(cfg, { after: agentListState.nextCursor });
+      const listed = page.agents.map(
+        (item) => forPortal(cfg, item, generatedSessionStores.current),
+      );
+      setAgents((current) => mergeAgentLists(current, listed));
+      setAgentListState({
+        loading: false,
+        loadingMore: false,
+        error: "",
+        hasMore: page.hasMore,
+        nextCursor: page.nextCursor,
+      });
+    } catch (e) {
+      setAgentListState((current) => ({
+        ...current,
+        loadingMore: false,
+        error: String(e),
+      }));
+    }
+  };
+
+  // Only Editor's one-shot Try it now request starts a session; shared URLs still select only.
+  useEffect(() => {
+    if (!cfg || agentListState.loading || editorRunHandled.current) return;
+    if (agent?.clientReferenceEc && transport === "webrtc") return;
+    editorRunHandled.current = true;
+    let requested;
+    try {
+      requested = window.sessionStorage.getItem("voice-agent-editor-run");
+      window.sessionStorage.removeItem("voice-agent-editor-run");
+    } catch (error) {
+      session.logError(`Could not read the Editor session request: ${error.message}`);
+      return;
+    }
+    if (!requested) return;
+    if (transportError) {
+      session.logError(transportError);
+      return;
+    }
+    if (agent?.name !== requested) {
+      session.logError(`Could not start Editor Agent '${requested}': it is not available in this Project.`);
+      return;
+    }
+    session.connect(
+      agent.name, "", "", cfg.apiVersion, transport, Boolean(agent.clientReferenceEc),
+    );
+  }, [cfg, agent, agentListState.loading, transport, transportError, session.connect, session.logError]);
 
   const onCreateAgent = async ({
     name: requestedName, model, voice, tools, subagents, inferenceMode, store, avatar,
     greeting, handoff, handoffInstructions, targetAgentName, targetAgentVersion, clientReferenceEc,
-    instructions, structuredInputs, description, namePrefix,
+    instructions, structuredInputs, description, namePrefix, inputTranscriptionModel,
   }) => {
     // Build the REAL service create request: name (client-generated) + full AgentDefinition body,
     // the api-version query, and Foundry-Features + Content-Type headers — matching the service
@@ -226,7 +512,7 @@ export function App() {
       handoffInstructions, targetAgentName, targetAgentVersion, clientReferenceEc,
       instructions, structuredInputs, description,
       greeting: buildGreetingConfig(greeting),
-      inputTranscriptionModel: cfg.inputTranscriptionModel,
+      inputTranscriptionModel,
     });
     const { path, body: requestBody } = buildVersionCreateRequest(cfg, body);
     session.logApi("POST", path);
@@ -344,8 +630,15 @@ export function App() {
 
   return (
     <div className="studio">
-      <StudioHeader cfg={cfg} disabled={session.isConnected} />
-      <div className="shell">
+      <StudioHeader cfg={cfg} disabled={session.isConnected}
+        debugMode={session.verbose} />
+      <div
+        ref={shellRef}
+        className={`shell${resizingWorkspace ? " is-resizing" : ""}`}
+        style={{ "--studio-side-width": workspaceResizedRef.current
+          ? `${sideColumnWidth}px`
+          : `calc((100% - ${WORKSPACE_SPLITTER_WIDTH}px) / 2)` }}
+      >
         <aside className="studio-side-column" aria-label="Agent creation and debugging">
           <section className={`studio-panel studio-config-panel${configurationCollapsed ? " is-collapsed" : ""}`}>
             <button
@@ -420,6 +713,8 @@ export function App() {
                   activeNodeId={session.activeHandoffNodeId}
                   takenEdgeIds={session.takenEdgeIds}
                   trail={session.handoffTrail}
+                  runtimeMetrics={session.handoffRuntimeMetrics}
+                  debugMode={session.verbose}
                   agentName={agent?.name || ""}
                 />
               ) : (
@@ -430,9 +725,31 @@ export function App() {
             </div>
           </section>
         </aside>
+        <div
+          className="studio-workspace-splitter"
+          role="separator"
+          aria-label="Resize Agent Debug and Live conversation panels"
+          aria-orientation="vertical"
+          aria-valuemin={WORKSPACE_MIN_SIDE_WIDTH}
+          aria-valuemax={Math.round(sideWidthBounds().max)}
+          aria-valuenow={Math.round(sideColumnWidth)}
+          tabIndex="0"
+          onPointerDown={startWorkspaceResize}
+          onPointerMove={moveWorkspaceResize}
+          onPointerUp={finishWorkspaceResize}
+          onPointerCancel={finishWorkspaceResize}
+          onKeyDown={resizeWorkspaceWithKeyboard}
+          onDoubleClick={resetWorkspaceSplit}
+          title="Drag to resize. Use Left/Right arrows for precise adjustment; double-click or press Home for equal widths."
+        >
+          <span aria-hidden="true" />
+        </div>
         <section className="playground-column" aria-label="Agent playground">
           <SessionControls cfg={cfg} session={session} agent={agent} agents={agents}
+            transport={transport} transportError={transportError} transportNotice={transportNotice}
+            onTransportChange={onTransportChange}
             agentListState={agentListState} onSelectAgent={onSelectAgent} onRefreshAgents={onRefreshAgents}
+            onLoadMoreAgents={onLoadMoreAgents}
             onEditAgent={() => setEditingAgentName(agent?.name || "")} />
           <ReviewPanel
             definition={authorMode === MODE_GENERATE ? generated?.definition : null}

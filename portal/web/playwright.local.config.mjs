@@ -1,10 +1,10 @@
 // Copyright (c) Microsoft. All rights reserved.
 import { defineConfig } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:8097";
+const baseURL = `http://127.0.0.1:${process.env.VOICE_PORTAL_TEST_PORT || 8097}`;
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "local.spec.mjs",
+  testMatch: ["local.spec.mjs", "template-versions.spec.mjs"],
   outputDir: "./test-results/local",
   workers: 1,
   timeout: 30_000,

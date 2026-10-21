@@ -228,7 +228,7 @@ function Trajectories({ nodes }) {
   );
 }
 
-function UserView({ turns, segAudioUrl }) {
+function UserView({ turns, segAudioUrl, debugMode }) {
   const [selected, setSelected] = useState(null);
   const bubbles = [];
   turns.forEach((t, i) => {
@@ -237,7 +237,7 @@ function UserView({ turns, segAudioUrl }) {
   });
   const sel = bubbles.find((b) => b.key === selected);
   return (
-    <div className="mp-userview">
+    <div className={`mp-userview${debugMode ? "" : " conversation-only"}`}>
       <div className="mp-chat">
         {bubbles.length === 0 ? <div className="wrtc-empty">No turns persisted yet.</div> : null}
         {bubbles.map((b) => {
@@ -257,19 +257,19 @@ function UserView({ turns, segAudioUrl }) {
           );
         })}
       </div>
-      <div className="mp-detail">
+      {debugMode ? <div className="mp-detail">
         <div className="mp-detail-label">Metadata</div>
         {sel ? (
           <pre className="mp-json">{JSON.stringify(sel.item, null, 2)}</pre>
         ) : (
           <div className="mp-detail-empty">Select a message to see its metadata.</div>
         )}
-      </div>
+      </div> : null}
     </div>
   );
 }
 
-export function MiniPortal({ items, conversation, responsesById, conversationId, warn, onRestart, onChooseConversation, wholeAudioUrl, onLoadRecording, segAudioUrl }) {
+export function MiniPortal({ items, conversation, responsesById, conversationId, warn, onRestart, onChooseConversation, wholeAudioUrl, onLoadRecording, segAudioUrl, debugMode = false }) {
   const [tab, setTab] = useState("trajectories");
   const turns = useMemo(() => buildTurns(items), [items]);
   const nodes = useMemo(
@@ -293,7 +293,7 @@ export function MiniPortal({ items, conversation, responsesById, conversationId,
           <span className="mp-conv" title={conversationId || ""}>{conversationId || "\u2014"}</span>
           <span className="mp-status">{(conversation && conversation.status) || "completed"}</span>
           {root && root.tokens != null ? <span className="mp-stat">{root.tokens} tokens</span> : null}
-          {root && root.durationMs != null ? <span className="mp-stat">{fmtDur(root.durationMs)}</span> : null}
+          {debugMode && root && root.durationMs != null ? <span className="mp-stat">{fmtDur(root.durationMs)}</span> : null}
           <span
             className="mp-stat mp-trace"
             title="The distributed trace id (trc-…) lives in Application Insights, not in the persisted conversation. Viewing it needs Log Analytics Reader on the trace store."
@@ -314,12 +314,14 @@ export function MiniPortal({ items, conversation, responsesById, conversationId,
         </div>
       ) : null}
 
-      <div className="mp-tabs">
+      {debugMode ? <div className="mp-tabs">
         <button className={"mp-tab" + (tab === "trajectories" ? " active" : "")} onClick={() => setTab("trajectories")}>Trajectories</button>
         <button className={"mp-tab" + (tab === "userview" ? " active" : "")} onClick={() => setTab("userview")}>User view</button>
-      </div>
+      </div> : null}
 
-      {tab === "trajectories" ? <Trajectories nodes={nodes} /> : <UserView turns={turns} segAudioUrl={segAudioUrl} />}
+      {debugMode && tab === "trajectories"
+        ? <Trajectories nodes={nodes} />
+        : <UserView turns={turns} segAudioUrl={segAudioUrl} debugMode={debugMode} />}
 
       <PlayerBar segments={segments} wholeAudioUrl={wholeAudioUrl} onLoadRecording={onLoadRecording} />
     </div>

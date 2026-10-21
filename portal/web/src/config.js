@@ -1,10 +1,34 @@
 // Copyright (c) Microsoft. All rights reserved.
 // Config loading + model/voice helpers (mirrors the demo's /config contract).
 
+async function readJson(response, path) {
+  const text = await response.text();
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { error: text };
+  }
+  if (!response.ok) {
+    const detail = payload?.error;
+    const message = typeof detail === "string"
+      ? detail
+      : detail?.message || payload?.message || `${path} HTTP ${response.status}`;
+    const requestId = detail?.request_id
+      || payload?.request_id
+      || response.headers.get("X-Portal-Request-Id")
+      || response.headers.get("x-ms-request-id");
+    const reference = requestId && !message.includes(requestId)
+      ? ` (request ${requestId})`
+      : "";
+    throw new Error(`${message}${reference}`);
+  }
+  return payload;
+}
+
 export async function loadConfig() {
   const resp = await fetch("/config");
-  if (!resp.ok) throw new Error(`/config HTTP ${resp.status}`);
-  return resp.json();
+  return readJson(resp, "/config");
 }
 
 // Dynamically discover the BYOM Foundry account's usable deployments (realtime + cascaded), so BYOM
@@ -13,14 +37,64 @@ export async function loadConfig() {
 // never throws for the caller's purposes — but guard anyway and let callers keep the /config fallback.
 export async function loadDeployments() {
   const resp = await fetch("/deployments");
-  if (!resp.ok) throw new Error(`/deployments HTTP ${resp.status}`);
-  return resp.json();
+  return readJson(resp, "/deployments");
 }
 
 // Cascaded models (e.g. gpt-4.1) use Azure Neural TTS and ONLY accept Azure voices. Covers both the
 // managed model names and the BYOM cascaded deployment names.
 export function isCascaded(cfg, model) {
   return (cfg?.cascadedModels || []).includes(model) || (cfg?.byomCascadedModels || []).includes(model);
+}
+
+const PREVIEW_TRANSCRIPTION_MODELS = new Set([
+  "mai-transcribe-2-streaming",
+  "gpt-live-transcribe",
+  "gpt-realtime-whisper",
+  "gpt-transcribe",
+]);
+
+export function compatibleTranscriptionModels(cfg, model, hosted = false) {
+  const fallback = cfg?.transcriptionModels || [cfg?.inputTranscriptionModel || "azure-speech"];
+  const configured = hosted || isCascaded(cfg, model)
+    ? cfg?.cascadedTranscriptionModels
+    : cfg?.realtimeTranscriptionModels;
+  return configured?.length ? configured : fallback;
+}
+
+export function transcriptionGroups(cfg, model, hosted = false) {
+  const compatible = new Set(compatibleTranscriptionModels(cfg, model, hosted));
+  const all = cfg?.transcriptionModels?.length
+    ? cfg.transcriptionModels
+    : [...compatible];
+  const items = all.map((value) => ({
+    value,
+    label: `${value}${PREVIEW_TRANSCRIPTION_MODELS.has(value) ? " · Preview" : ""}${
+      compatible.has(value) ? "" : " · unavailable for this model"
+    }`,
+    disabled: !compatible.has(value),
+  }));
+  return [
+    {
+      label: hosted || isCascaded(cfg, model)
+        ? "Cascaded input transcription"
+        : "Realtime transcript",
+      items,
+    },
+  ];
+}
+
+export function defaultTranscriptionFor(cfg, model, hosted = false, preferred = "") {
+  const compatible = compatibleTranscriptionModels(cfg, model, hosted);
+  if (compatible.includes(preferred)) return preferred;
+  return compatible.includes(cfg?.inputTranscriptionModel)
+    ? cfg.inputTranscriptionModel
+    : compatible[0] || "azure-speech";
+}
+
+export function isVoiceCompatible(cfg, model, voice, azureOnly = false) {
+  if (!voice) return false;
+  if (!azureOnly && !isCascaded(cfg, model)) return true;
+  return (cfg?.azureVoices || []).includes(voice) || voice.includes("-");
 }
 
 // Build grouped options for a <select> of models: Realtime vs Cascaded. When `byom` is true, offer the
@@ -43,8 +117,15 @@ export function modelGroups(cfg, byom) {
 
 // Build grouped voice options. When azureOnly is true (cascaded models), only Azure voices.
 export function voiceGroups(cfg, azureOnly) {
-  const groups = [{ label: "Azure", items: cfg.azureVoices || [] }];
-  if (!azureOnly) groups.unshift({ label: "OpenAI", items: cfg.openaiVoices || [] });
+  const openai = (cfg.openaiVoices || []).map((value) => ({
+    value,
+    label: `${value}${azureOnly ? " · unavailable for this model" : ""}`,
+    disabled: azureOnly,
+  }));
+  const groups = [
+    { label: "OpenAI native voices", items: openai },
+    { label: "Azure Speech voices", items: cfg.azureVoices || [] },
+  ];
   return groups.filter((g) => g.items.length);
 }
 

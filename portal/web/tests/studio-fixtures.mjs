@@ -13,6 +13,19 @@ export const CONFIG = {
   defaultAzureVoice: "en-US-AvaNeural",
   defaultInferenceMode: "model",
   inputTranscriptionModel: "azure-speech",
+  transcriptionModels: [
+    "azure-speech", "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming",
+    "gpt-live-transcribe", "gpt-realtime-whisper", "gpt-transcribe", "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe", "gpt-4o-transcribe-diarize", "whisper-1",
+  ],
+  realtimeTranscriptionModels: [
+    "azure-speech", "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming",
+    "gpt-live-transcribe", "gpt-realtime-whisper", "gpt-transcribe", "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe", "gpt-4o-transcribe-diarize", "whisper-1",
+  ],
+  cascadedTranscriptionModels: [
+    "azure-speech", "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming",
+  ],
   models: ["gpt-realtime", "gpt-4.1"],
   realtimeModels: ["gpt-realtime"],
   cascadedModels: ["gpt-4.1"],
@@ -53,10 +66,31 @@ const voiceDefinition = (model, voice, clientReferenceEc = false) => ({
   },
 });
 
-export async function mountStudio(page, configPatch = {}, path = "/demo/") {
+export async function mockWebRtcPeer(page) {
+  // Keep browser regression tests off STUN/TURN and media networks.
+  await page.addInitScript(() => {
+    window.RTCPeerConnection = class extends EventTarget {
+      iceGatheringState = "complete";
+      connectionState = "new";
+      signalingState = "stable";
+      localDescription = null;
+      addTrack() { return {}; }
+      addTransceiver() { return {}; }
+      getSenders() { return []; }
+      createDataChannel() { return Object.assign(new EventTarget(), { readyState: "open", close() {} }); }
+      async createOffer() { return { type: "offer", sdp: "synthetic-test-sdp" }; }
+      async setLocalDescription(value) { this.localDescription = value; }
+      async setRemoteDescription() {}
+      async addIceCandidate() {}
+      close() { this.connectionState = "closed"; }
+    };
+  });
+}
+
+export async function mountStudio(page, configPatch = {}, path = "/demo/", options = {}) {
   const api = {
     creates: [], generates: [], versions: [], sockets: [], messages: [], errors: [],
-    projectSelections: [],
+    projectSelections: [], agentListQueries: [], agentReads: [],
     rejectCreate: false, createGate: null, generateGate: null, autoReply: false,
   };
   const entries = [
@@ -94,6 +128,14 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     resource("hosted-target", { kind: "hosted", protocol_versions: [{ protocol: "invocations_ws", version: "1.0.0" }] },
       { metadata: { voiceLiveCompatible: "true", bridgeProtocolVersion: "1.0" }, status: "active" }),
   ];
+  for (let index = 0; index < (options.extraVoiceAgents || 0); index += 1) {
+    entries.push(resource(
+      `paged-agent-${String(index + 1).padStart(2, "0")}`,
+      voiceDefinition("gpt-realtime", "en-US-AvaNeural"),
+      { created_at: 100 + index },
+    ));
+  }
+  entries.push(...(options.extraAgents || []));
   const agents = new Map(entries.map((item) => [item.name, item]));
   page.on("pageerror", (error) => api.errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") api.errors.push(message.text()); });
@@ -104,7 +146,15 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     const url = new URL(request.url());
     if (url.hostname !== "127.0.0.1") return route.abort();
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    if (url.pathname === "/config") return json({ ...CONFIG, ...configPatch });
+    if (url.pathname === "/config") {
+      if (options.configError) {
+        return json({
+          error: options.configError,
+          request_id: options.configRequestId || "portal-request-id",
+        }, 500);
+      }
+      return json({ ...CONFIG, ...configPatch });
+    }
     if (url.pathname === "/api/projects") return json({
       current_endpoint: CONFIG.host,
       projects: [
@@ -164,7 +214,23 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     }
     if (url.pathname === "/agents") {
       const data = [...agents.values()].filter((item) => !url.searchParams.has("kind") || item.versions.latest.definition.kind === "voice");
-      return json({ data, has_more: false });
+      const after = url.searchParams.get("after");
+      const requestedLimit = Number(url.searchParams.get("limit"));
+      const limit = Number.isInteger(requestedLimit) && requestedLimit > 0
+        ? requestedLimit
+        : data.length;
+      const cursorIndex = after
+        ? data.findIndex((item) => item.name === after)
+        : -1;
+      const start = cursorIndex + 1;
+      const pageData = data.slice(start, start + limit);
+      const hasMore = start + pageData.length < data.length;
+      api.agentListQueries.push(url.search);
+      return json({
+        data: pageData,
+        has_more: hasMore,
+        ...(hasMore ? { last_id: pageData.at(-1).name } : {}),
+      });
     }
     const agentRoute = url.pathname.match(/^\/agents\/([^/]+)(?:\/versions(?:\/([^/]+))?)?$/);
     if (agentRoute) {
@@ -177,6 +243,7 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
         item.versions.latest = { ...item.versions.latest, ...body, version: "2" };
         return json({ version: "2" });
       }
+      api.agentReads.push(name);
       return json(agentRoute[2] ? item.versions.latest : item);
     }
     if (url.pathname === "/foundry-trace" || url.pathname.endsWith("persisted.html")) {
@@ -194,6 +261,7 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     });
   });
   api.send = (event) => api.sockets.at(-1).send(JSON.stringify(event));
+  api.close = (code, reason) => api.sockets.at(-1).close({ code, reason });
   api.answer = (text) => {
     api.send({ type: "response.created", response: { id: "resp-answer" } });
     api.send({ type: "response.output_text.delta", response_id: "resp-answer", delta: text });
@@ -203,7 +271,7 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     ] } });
   };
   api.start = async (name = "realtime-agent") => {
-    await page.getByLabel("Session agent", { exact: true }).selectOption(name);
+    await selectSessionAgent(page, name);
     await page.getByRole("button", { name: "Connect & start session" }).click();
     await expect.poll(() => api.sockets.length).toBeGreaterThan(0);
     await expect(page.getByRole("button", { name: "Stop session" })).toBeVisible();
@@ -214,8 +282,16 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/") {
     await expect(page.getByRole("button", { name: "Mute mic" })).toBeEnabled();
   };
   await page.goto(path);
+  if (options.configError) return api;
   await expect(page.getByRole("heading", { name: "Agent Creation" })).toBeVisible();
   return api;
+}
+
+export async function selectSessionAgent(page, name) {
+  const picker = page.getByLabel("Session agent", { exact: true });
+  await picker.fill(name);
+  await picker.press("Enter");
+  await expect(picker).toHaveValue(name);
 }
 
 export async function selectTab(page, name) {

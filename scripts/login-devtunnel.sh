@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVTUNNEL="${ROOT}/.local-mcp-and-ui/tools/devtunnel/bin/devtunnel"
+DEVTUNNEL="${ROOT}/.local-tools/devtunnel/bin/devtunnel"
 
 case "${1:-}" in
   "")

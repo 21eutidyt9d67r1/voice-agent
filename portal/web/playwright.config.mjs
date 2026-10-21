@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: ["studio.spec.mjs", "privacy.spec.mjs"],
+  testMatch: ["studio.spec.mjs", "privacy.spec.mjs", "playback.spec.mjs"],
   outputDir: "./test-results/studio",
   fullyParallel: true,
   workers: 4,

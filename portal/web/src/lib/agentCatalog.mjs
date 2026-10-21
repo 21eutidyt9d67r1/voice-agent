@@ -138,40 +138,64 @@ export async function validateHostedAgentTarget(
   return assertBridgeCompatibleHostedAgent(data, targetName, targetVersion);
 }
 
+export const AGENT_PAGE_SIZE = 25;
+
+export async function loadVoiceAgentPage(
+  cfg,
+  { after = "", limit = AGENT_PAGE_SIZE } = {},
+  fetchImpl = fetch,
+) {
+  const query = new URLSearchParams({
+    "api-version": cfg.apiVersion,
+    kind: "voice",
+    limit: String(limit),
+  });
+  if (after) query.set("after", after);
+
+  const path = `/agents?${query.toString()}`;
+  const response = await fetchImpl(path, {
+    headers: { "Foundry-Features": cfg.foundryFeatures },
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(errorMessage(data, `GET ${path} failed with HTTP ${response.status}`));
+  }
+
+  const agents = new Map();
+  for (const resource of data.data || []) {
+    const agent = asVoiceAgent(resource);
+    if (agent) agents.set(agent.name, agent);
+  }
+
+  const hasMore = Boolean(data.has_more);
+  const nextCursor = hasMore ? String(data.last_id || "") : "";
+  if (hasMore && !nextCursor) {
+    throw new Error("List agents returned has_more without a usable pagination cursor");
+  }
+
+  return {
+    agents: [...agents.values()].sort(
+      (left, right) => right.createdAt - left.createdAt || left.name.localeCompare(right.name),
+    ),
+    hasMore,
+    nextCursor,
+  };
+}
+
 export async function loadVoiceAgents(cfg, fetchImpl = fetch) {
   const agents = new Map();
   const seenCursors = new Set();
   let after = "";
 
   while (true) {
-    const query = new URLSearchParams({
-      "api-version": cfg.apiVersion,
-      kind: "voice",
-      limit: "100",
-    });
-    if (after) query.set("after", after);
-
-    const path = `/agents?${query.toString()}`;
-    const response = await fetchImpl(path, {
-      headers: { "Foundry-Features": cfg.foundryFeatures },
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(errorMessage(data, `GET ${path} failed with HTTP ${response.status}`));
+    const page = await loadVoiceAgentPage(cfg, { after, limit: 100 }, fetchImpl);
+    for (const agent of page.agents) agents.set(agent.name, agent);
+    if (!page.hasMore) break;
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("List agents returned a repeated pagination cursor");
     }
-
-    for (const resource of data.data || []) {
-      const agent = asVoiceAgent(resource);
-      if (agent) agents.set(agent.name, agent);
-    }
-
-    if (!data.has_more) break;
-    const next = data.last_id;
-    if (!next || seenCursors.has(next)) {
-      throw new Error("List agents returned has_more without a usable pagination cursor");
-    }
-    seenCursors.add(next);
-    after = next;
+    seenCursors.add(page.nextCursor);
+    after = page.nextCursor;
   }
 
   return [...agents.values()].sort(

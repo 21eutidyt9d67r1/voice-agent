@@ -9,9 +9,9 @@ regions, model choices, and run commands. The [common Python setup](#common-pyth
 below applies to the top-level Python scripts; directory-based samples may have
 their own dependencies and setup.
 
-For the general browser UI, use the
-[`portal/`](../portal/README.md) instead. For the complete Finance sample,
-shared MCP, and portal workflow, start with the
+For the general browser UI, use the local
+[`portal/`](../portal/README.md). For the Finance CLI samples and the
+independent shared MCP reference implementation, start with the
 [Finance documentation index](../docs/README.md).
 
 ## Choose a sample
@@ -39,13 +39,77 @@ shared MCP, and portal workflow, start with the
 | [Documentation-generated voice web sample](foundry_voice_webrtc/README.md) | Connect a browser to an existing voice Agent with generally available WebSocket or WebRTC transports; standalone Python backend, Azure CLI authentication, and Azure session storage enabled. |
 | [Basic prompt subagent](subagent/voice_subagent_prompt_basic/README.md) | Create a poetry prompt subagent and a voice agent that delegates poem writing to it. |
 | [Hosted GitHub Copilot subagent](subagent/voice_subagent_hosted_agent/README.md) | Create a voice agent that delegates research, learning, and coding tasks to an existing hosted GitHub Copilot agent. |
-| [Finance with Handoff](example1_finance_with_handoff/README.md) | Publish Realtime and Cascade Luna variants of one shared Finance handoff graph and run text Voice WebSocket smoke tests. |
+| [Finance with Handoff - Realtime](example1_finance_with_handoff_realtime/README.md) | Finance graph on the Realtime pipeline (`gpt-realtime-regional`) with a text Voice WebSocket CLI. |
+| [Finance with Handoff - Cascade](example1_finance_with_handoff_cascade/README.md) | Finance graph on the Cascade pipeline (`gpt-4.1-mini`, Azure Speech) in its own directory, with its own CLI. |
 | [Finance with OTP and Officer Search](example2_finance_with_OTP_and_Officer_Search/README.md) | Publish a flat Finance Agent for OTP verification and loan-officer search, then run a text smoke test. |
 | [Elevator Service with Safety, Zendesk, and Handoff](example3_elevator_service_with_safety_zendesk_and_handoff/README.md) | Publish an inbound field-service graph with deterministic safety checks, explicit Zendesk ticket confirmation, exact-ID status queries, and human-assistance routing. |
+| [Front Desk with Fluency and Handoff](example4_frontdesk_with_fluency_and_handoff/README.md) | Load a response-first receptionist Template with company FAQ, grounded support search, honest transfer fallback, and callback-message persistence only after explicit confirmation. |
+| [Customer Support with Handoff](example5_customer_support/README.md) | Run a support graph with staged handoff, spoken transfer messages, one-step troubleshooting, and an unsubmitted follow-up summary. |
+| [Appointment Setter with Handoff](example6_appointment_setter/README.md) | Run a appointment graph that qualifies interest, collects proposed meeting times, and reads back a meeting request without booking it. |
+| [Receptionist and Messaging with Handoff](example7_receptionist_messaging/README.md) | Run a front desk graph that answers company questions from sample facts, routes callers to a directory entry, and reads back a message for follow-up without sending it. |
+| [Appointment Scheduler with Handoff](example8_appointment_scheduler/README.md) | Run a scheduling graph that captures new, reschedule, and cancel requests for a sample clinic and reads them back without booking or changing anything. |
+| [Assessment and Quiz with Handoff](example9_assessment_quiz_agent/README.md) | Run a quiz graph that asks 10 security awareness questions one at a time and branches to a pass or needs-work debrief. |
+| [Collections and Payment Recovery with Handoff](example10_collections_payment_recovery_agent/README.md) | Run a outbound collections graph that verifies the holder, explains a past-due balance, and captures a payment arrangement or hardship request for follow-up. |
+| [Corporate Training Role-Play Coach with Handoff](example11_corporate_training_roleplay_coach/README.md) | Run a role-play graph that stays in character for a tough workplace conversation and then switches to a scored coaching debrief. |
+| [Education and Tutoring with Handoff](example12_education_tutoring/README.md) | Run a tutoring graph that assesses the student, branches to fundamentals or advanced exploration, practices problems, and wraps up without booking a session. |
+| [Healthcare Receptionist with Handoff](example13_healthcare_receptionist/README.md) | Run a medical front desk graph that captures appointment and change requests for a sample practice and routes emergencies to 911 without booking anything. |
+| [Hotel Reservations with Handoff](example14_hotel_reservation_agent/README.md) | Run a hotel graph that quotes sample room rates, takes reservation and change requests for the front desk, and answers amenity questions. |
+| [Inbound Lead Qualifier with Handoff](example15_inbound_lead_qualifier/README.md) | Run a BANT qualification graph that routes hot leads to a meeting request and others to a nurture follow-up without booking or creating records. |
+| [Incident Response Coordinator with Handoff](example16_incident_response_coordinator/README.md) | Run a incident triage graph that classifies severity and prepares page or ticket details that someone must send manually. |
+| [Insurance Advisor with Handoff](example17_insurance_advisor/README.md) | Run a insurance graph that explores coverage, explains typical ranges, captures an application for a licensed agent, and redirects claims. |
+| [Internal Knowledge Assistant with Handoff](example18_internal_knowledge_assistant/README.md) | Run a internal Q&A graph that routes factual, multi-step, and unknown questions and notes documentation gaps without searching or filing anything. |
+| [IT Access Request Agent with Handoff](example19_it_access_request_agent/README.md) | Run a access-request graph that classifies requests as standard, manager approval, or restricted and reads back the request without filing it. |
+| [IT Help Desk with Handoff](example20_it_help_desk_internal_support/README.md) | Run a IT help desk graph that troubleshoots one step at a time and reads back an escalation without filing a ticket. |
+| [Language Practice Tutor with Handoff](example21_language_practice_tutor/README.md) | Run a language practice graph that branches by level and recaps the session without booking the next one. |
+| [Legal Intake Specialist with Handoff](example22_legal_intake_specialist/README.md) | Run a legal intake graph that screens emergencies and out-of-scope matters, collects case facts, and captures a consultation request without saving or booking it. |
+| [Marketing Lead Capture with Handoff](example23_marketing_lead_capture_agent/README.md) | Run a lead-capture graph that routes hot leads to a sales-call request and others to a resource follow-up without booking or sending anything. |
+| [New Hire Onboarding Assistant with Handoff](example24_new_hire_onboarding_assistant/README.md) | Run a onboarding graph that branches by role, covers benefits, and shares key contacts without booking a 1:1 or sending a text. |
+| [Order Status and Tracking with Handoff](example25_order_status_tracking/README.md) | Run a order support graph that gives shipping timelines, captures return requests, and notes warranty claims without logging or texting anything. |
+| [Outbound Sales Representative with Handoff](example26_outbound_sales_representative/README.md) | Run a outbound sales graph with a permission-based opener, objection handling, and a demo request that is not booked. |
+| [Personal Voice Assistant with Handoff](example27_personal_voice_assistant/README.md) | Run a assistant graph that answers from sample facts, reads back notes, and identifies the right team without emailing or filing anything. |
+| [Real Estate Lead Follow-Up with Handoff](example28_real_estate_lead_follow_up/README.md) | Run a real estate graph that qualifies a buyer, discusses sample listings, and captures showing or information requests without booking or sending anything. |
+| [Restaurant Phone Order Taker with Handoff](example29_restaurant_phone_order_taker/README.md) | Run a order-taking graph that branches by pickup or delivery and reads back the order with its total without texting a summary. |
+| [Salon and Spa Receptionist with Handoff](example30_salon_spa_beauty_receptionist/README.md) | Run a salon graph that answers menu questions and captures appointment requests without booking or texting. |
+| [Survey and Feedback Intake with Handoff](example31_survey_feedback_intake/README.md) | Run a outbound survey graph that asks consent, runs four questions one at a time, and reads the answers back without saving them. |
+| [Technical Support Agent with Handoff](example32_technical_support_agent/README.md) | Run a technical support graph that troubleshoots one step at a time and reads back an escalation without filing a ticket. |
+| [Travel Agency Trip Planner with Handoff](example33_travel_agency_trip_planner/README.md) | Run a trip planning graph that recommends sample packages with ballpark pricing and captures a trip request without booking it. |
+| [User Research Interviewer with Handoff](example34_user_research_interviewer/README.md) | Run a interview graph that branches on available time between a deep dive and priority questions and recaps the answers. |
 | [C# voice agent sample](CSharp/README.md) | Create and manage a temporary Agent or use an existing Agent, stream audio over WebSocket, and read persisted conversations and recordings. |
 | [Java live audio Voice Agent sample](java/README.md) | Create a temporary Agent and run an asynchronous microphone and speaker conversation with Enter-to-end, barge-in, persisted conversation readback, and cleanup. |
 | [`download_conversation_artifacts.py`](download_conversation_artifacts.py) | Download conversation JSON, per-turn WAV files, and the merged stereo WAV. |
 | [`download_conversation_traces.py`](download_conversation_traces.py) | Download correlated Application Insights rows by conversation ID. |
+
+Examples 5–34 call mock tools with fixed, fictional data on the public no-auth
+`/mcp/mock-tool-call` route by default, so they need no MCP setup and nothing
+real is booked, sent, or charged. To use your own systems, see
+[Connect real tools](../docs/05_connect_real_tools.md).
+
+### Realtime sample: Project region, model, and GPU routing
+
+The eight original Portal template cards (Examples 1–7) use 400 ms `azure_semantic_vad` silence.
+Most use `gpt-realtime`; Finance Realtime uses `gpt-realtime-regional` and
+Finance Cascade uses `gpt-4.1-mini`. Each card has a single version, its root
+`agent.json`. Runtime configuration does not by itself establish improved
+measured latency or VAD safety.
+
+The separate regional samples below intentionally document their own model
+and Project requirements; they are not additional Portal template versions.
+
+| Foundry Project region | Model to select | GPU inference location |
+| --- | --- | --- |
+| East US 2 (`eastus2`) | `gpt-realtime-2.1-datazone` | Within the US data zone; not necessarily East US 2 specifically. |
+| Japan East (`japaneast`) | `azure-realtime` | Japan East, with service-team-confirmed routing for the selected Project. |
+| Central India (`centralindia`) | `gpt-realtime` | Standard (regional) processing in Central India, per the public model/region table; Voice Agent eligibility must be confirmed separately. |
+
+**East US 2 Project: use the Data Zone model to keep inference on US GPUs.
+Japan East Foundry Project: use Azure Realtime with confirmed Japan East GPU routing.**
+The Japan East routing confirmation is Project-specific, not a guarantee for
+every Japan-region Project or a change to the public Global Standard
+classification. See the [full setup and commands](realtime_datazone_voice_agent.md).
+For Central India, use the exact `gpt-realtime` model, not `gpt-realtime-2.1`
+(the latter is listed as Global Standard there). The public table currently
+does not list Agent support in Central India; confirm enablement before running
+this voice-first Agent sample.
 
 ## Choose the right setup
 

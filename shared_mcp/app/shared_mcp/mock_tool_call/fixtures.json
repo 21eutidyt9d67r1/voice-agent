@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "contacts": [
+    {
+      "Id": "003MOCK000000001",
+      "Name": "Jack Rogers",
+      "Email": "jrogers@burlington.com",
+      "Phone": "+13362227000",
+      "Title": "VP, Facilities",
+      "Account": {"Name": "Burlington Textiles Corp of America"}
+    },
+    {
+      "Id": "003MOCK000000002",
+      "Name": "Jordan Lee",
+      "Email": "jordan.lee@example.com",
+      "Phone": "+14255550123",
+      "Title": "Customer",
+      "Account": {"Name": "Individual"}
+    },
+    {
+      "Id": "003MOCK000000003",
+      "Name": "Rose Gonzalez",
+      "Email": "rose@edge.com",
+      "Phone": "+15124575000",
+      "Title": "SVP, Procurement",
+      "Account": {"Name": "Edge Communications"}
+    },
+    {
+      "Id": "003MOCK000000004",
+      "Name": "Tim Barr",
+      "Email": "barr_tim@grandhotels.com",
+      "Phone": "+13125963300",
+      "Title": "SVP, Administration and Finance",
+      "Account": {"Name": "Grand Hotels and Resorts Ltd"}
+    }
+  ],
+  "tickets": [
+    {
+      "id": 1,
+      "subject": "Cannot sign in after password change",
+      "status": "solved",
+      "priority": "normal",
+      "requester_name": "Rose Gonzalez",
+      "requester_email": "rose@edge.com",
+      "description": "Sign-in fails after the password was changed; solved by clearing saved credentials."
+    },
+    {
+      "id": 2,
+      "subject": "Invoice shows the wrong billing address",
+      "status": "pending",
+      "priority": "low",
+      "requester_name": "Tim Barr",
+      "requester_email": "barr_tim@grandhotels.com",
+      "description": "The October invoice lists the old billing address."
+    },
+    {
+      "id": 3,
+      "subject": "API requests return 401 Unauthorized",
+      "status": "open",
+      "priority": "high",
+      "requester_name": "Jack Rogers",
+      "requester_email": "jrogers@burlington.com",
+      "description": "Calls to the reporting API return 401 since the key was rotated."
+    }
+  ],
+  "articles": [
+    {
+      "id": 360001,
+      "title": "Reset your password or re-register MFA",
+      "body": "Go to passwordreset.contoso.com, verify with your registered phone or authenticator app, and choose a new password. The same page re-registers multi-factor authentication (MFA) when you change phones. Support never asks for your password.",
+      "labels": ["password", "locked out", "mfa", "sign in", "forgot password", "account"]
+    },
+    {
+      "id": 360002,
+      "title": "Fix 'authentication failed' in the GlobalProtect VPN client",
+      "body": "1. Sign out of GlobalProtect and sign in again with your full work email. 2. Confirm your password works at myapps.contoso.com. 3. Remove the saved portal and add vpn.contoso.com again. 4. If it still fails, restart the computer and try once more before contacting IT.",
+      "labels": ["vpn", "globalprotect", "authentication failed", "remote", "work from home"]
+    },
+    {
+      "id": 360003,
+      "title": "Troubleshoot data sync failures",
+      "body": "1. Check the sync status page in Settings > Sync for the last error. 2. Reconnect the data source with a fresh sign-in. 3. Make sure the source table has fewer than 1 million changed rows per run. 4. Run a manual sync and wait 10 minutes before checking again.",
+      "labels": ["sync", "data", "pipeline", "connector", "fails", "error"]
+    },
+    {
+      "id": 360004,
+      "title": "API returns 401 Unauthorized",
+      "body": "A 401 means the API key or token is missing, expired, or rotated. 1. Create a new API key under Settings > API keys. 2. Send it in the Authorization header as 'Bearer <key>'. 3. Keys rotate every 90 days; update every integration after a rotation.",
+      "labels": ["api", "401", "unauthorized", "token", "key", "integration"]
+    },
+    {
+      "id": 360005,
+      "title": "Install approved software from Company Portal",
+      "body": "Open the Company Portal app, search for the application, and select Install. Software that is not listed needs IT management approval through a ticket.",
+      "labels": ["software", "install", "company portal", "application", "app"]
+    },
+    {
+      "id": 360006,
+      "title": "External monitor flickers or shows no signal",
+      "body": "1. Reseat both ends of the cable or try another port. 2. Update the display driver from Company Portal. 3. Lower the refresh rate to 60 Hz in Display settings. 4. Test with a different cable before asking for a replacement.",
+      "labels": ["monitor", "display", "flicker", "flickering", "screen", "no signal", "hardware"]
+    },
+    {
+      "id": 360007,
+      "title": "Submit an expense report",
+      "body": "Open Expenses on the intranet, attach a photo of each receipt, and submit within 30 days of the purchase. Your manager approves the report, and reimbursement arrives with the next payroll.",
+      "labels": ["expense", "receipt", "reimbursement", "finance"]
+    },
+    {
+      "id": 360008,
+      "title": "Request paid time off",
+      "body": "Request PTO in the HR portal under Time Off at least two weeks ahead for more than three days. Your manager approves it. Exceptions to the PTO policy go to your HR people partner.",
+      "labels": ["pto", "vacation", "time off", "leave", "holiday", "hr"]
+    },
+    {
+      "id": 360009,
+      "title": "Connect to office Wi-Fi",
+      "body": "Choose the Contoso-Corp network and sign in with your work email and password. Guests use Contoso-Guest with the daily code from reception.",
+      "labels": ["wifi", "wi-fi", "wireless", "network", "internet", "office"]
+    },
+    {
+      "id": 360010,
+      "title": "Set up multi-factor authentication",
+      "body": "Install Microsoft Authenticator, open myapps.contoso.com > Security info, and add the app by scanning the QR code. Keep a phone number as a backup method.",
+      "labels": ["mfa", "authenticator", "two-factor", "security", "sign in"]
+    }
+  ],
+  "directory": [
+    {"email": "alexw@contoso.com", "name": "Alex Wilber", "availability": "Available", "activity": "Available"},
+    {"email": "meganb@contoso.com", "name": "Megan Bowen", "availability": "Busy", "activity": "InAMeeting"},
+    {"email": "adelev@contoso.com", "name": "Adele Vance", "availability": "Away", "activity": "Away"},
+    {"email": "isaiahl@contoso.com", "name": "Isaiah Langer", "availability": "Offline", "activity": "OffWork"}
+  ],
+  "calendar": {
+    "user_time_zone": "Pacific Standard Time",
+    "seed_events": [
+      {
+        "id": "mock-evt-seed-1",
+        "subject": "Follow-up visit with Dana Test",
+        "weekday": "Thursday",
+        "start": "10:00",
+        "minutes": 30,
+        "time_zone": "Pacific Standard Time",
+        "attendees": ["dana.test20261020@example.com"],
+        "is_online_meeting": true
+      },
+      {
+        "id": "mock-evt-seed-2",
+        "subject": "Initial consultation with Jordan Lee",
+        "weekday": "Friday",
+        "start": "14:00",
+        "minutes": 60,
+        "time_zone": "Pacific Standard Time",
+        "attendees": ["jordan.lee@example.com"],
+        "is_online_meeting": true
+      }
+    ]
+  },
+  "sms": {
+    "failing_numbers": ["+15005550001"]
+  },
+  "orders": [
+    {
+      "order_number": "10045",
+      "customer_name": "Dana Test",
+      "email": "dana.test20261020@example.com",
+      "ordered_days_ago": 6,
+      "shipped_days_ago": 5,
+      "shipping_method": "standard",
+      "carrier": "Contoso Express",
+      "tracking_number": "CX100450001",
+      "status": "in_transit",
+      "items": [
+        {"name": "Rain jacket, size M", "quantity": 1, "final_sale": false},
+        {"name": "Wool socks, 3 pack", "quantity": 1, "final_sale": true}
+      ]
+    },
+    {
+      "order_number": "10046",
+      "customer_name": "Jordan Lee",
+      "email": "jordan.lee@example.com",
+      "ordered_days_ago": 0,
+      "shipped_days_ago": null,
+      "shipping_method": "express",
+      "carrier": null,
+      "tracking_number": null,
+      "status": "processing",
+      "items": [
+        {"name": "Blender, 1.5 L", "quantity": 1, "final_sale": false}
+      ]
+    },
+    {
+      "order_number": "10047",
+      "customer_name": "Jack Rogers",
+      "email": "jrogers@burlington.com",
+      "ordered_days_ago": 20,
+      "shipped_days_ago": 19,
+      "delivered_days_ago": 15,
+      "shipping_method": "standard",
+      "carrier": "Contoso Express",
+      "tracking_number": "CX100470001",
+      "status": "delivered",
+      "items": [
+        {"name": "Desk lamp", "quantity": 2, "final_sale": false}
+      ]
+    }
+  ],
+  "hotel": {
+    "name": "The Grand Hotel",
+    "rooms": [
+      {"room_type": "Classic King", "sleeps": 2, "nightly_rate": 229},
+      {"room_type": "Deluxe Double Queen", "sleeps": 4, "nightly_rate": 259},
+      {"room_type": "Junior Suite", "sleeps": 3, "nightly_rate": 349, "sold_out_nights": ["Saturday"]}
+    ],
+    "reservations": [
+      {
+        "confirmation_number": "A1B2C3",
+        "first_name": "Dana",
+        "last_name": "Test",
+        "room_type": "Classic King",
+        "arrival_days_from_today": 14,
+        "nights": 2,
+        "guests": 2
+      }
+    ]
+  }
+}

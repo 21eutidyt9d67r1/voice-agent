@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Templates · Voice Agents</title>
-  <link rel="stylesheet" href="/static/template-styles.css?v=20260916-1" />
+  <link rel="stylesheet" href="/static/template-styles.css?v=20261020-template-versions" />
 </head>
 <body>
   <header class="local-template-header">
     <a class="local-template-brand" href="/">Voice agent <span>playground</span></a>
     <nav aria-label="Portal pages">
-      <a href="/">Live session</a>
-      <span>Templates</span>
+      <a href="/editor/">Editor</a>
+      <a href="/demo/">AgentRuntime</a>
     </nav>
     <strong>Build from a proven starting point</strong>
   </header>
@@ -45,6 +45,10 @@
               <h2 id="detail-name">—</h2>
               <p id="detail-desc" class="muted"></p>
               <div id="detail-tags"></div>
+              <div class="template-version-field">
+                <label for="template-version">Version</label>
+                <select id="template-version" disabled></select>
+              </div>
             </div>
             <div class="detail-badges" id="detail-badges"></div>
           </div>
@@ -195,6 +199,6 @@
       </button>
     </section>
   </div>
-  <script type="module" src="/static/template-app.js?v=20260916-2"></script>
+  <script type="module" src="/static/template-app.js?v=20261020-template-versions"></script>
 </body>
 </html>

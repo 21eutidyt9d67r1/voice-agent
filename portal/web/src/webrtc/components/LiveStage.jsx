@@ -50,7 +50,8 @@ export function LiveStage({ session, agent, onEnd }) {
           <div className="wrtc-empty">Say hello — the agent is listening…</div>
         ) : null}
         {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} allMessages={messages} />
+          <MessageBubble key={m.id} message={m} allMessages={messages}
+            debugMode={session.verbose} />
         ))}
       </div>
     </section>

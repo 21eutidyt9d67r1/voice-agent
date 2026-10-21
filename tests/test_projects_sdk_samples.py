@@ -219,7 +219,8 @@ class ProjectsSDKSampleTests(unittest.IsolatedAsyncioTestCase):
         }
         management_requirements = {
             "create_agent_with_iq_avatar_voice/requirements.txt",
-            "example1_finance_with_handoff/requirements.txt",
+            "example1_finance_with_handoff_realtime/requirements.txt",
+            "example1_finance_with_handoff_cascade/requirements.txt",
             "example2_finance_with_OTP_and_Officer_Search/requirements.txt",
         }
         for relative_path in sorted(voice_requirements | management_requirements):

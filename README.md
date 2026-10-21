@@ -124,41 +124,35 @@ users and coding agents to the correct entry point.
 See [Platform support](#platform-support) for workflow-specific operating-system
 requirements.
 
-For an unqualified request such as **"run the UI"** or **"start the portal"**,
-use [`portal/`](portal/README.md). It is the general Voice Agent UI and runs on
-`http://127.0.0.1:9527` by default. Do not start the Finance MCP stack unless
-the request mentions Finance, Templates, or the shared MCP.
+For an unqualified request such as **"run the UI"**, **"start the portal"**,
+or **"open Templates"**, use [`portal/`](portal/README.md). It is the local
+Voice Agent UI, runs on `http://127.0.0.1:9527` by default, and uses the public
+no-auth MCP configured in `portal/templates.config.json`.
 
-### Portal + local MCP quickstart
+### Local Portal quickstart
 
-Use this path when the portal must publish or run the checked-in Templates.
-It is the recommended end-to-end workflow:
+The Portal does not require a local MCP process, Dev Tunnel, bearer token, or
+Foundry Project connection. **You do not need to start [`shared_mcp/`](shared_mcp/README.md).**
+Every Portal Template calls its tools on the public no-auth MCP configured in
+`portal/templates.config.json`: Examples 1–4 use their business routes and
+Examples 5–34 use mock tool calls on `/mcp/mock-tool-call`. Start `shared_mcp`
+only for the Finance CLI samples or to host those Finance routes yourself.
 
 ```bash
-cd /path/to/voice-agent
 az login
-./scripts/setup-local-examples.sh \
-   --project-endpoint "https://<account>.services.ai.azure.com/api/projects/<project>"
-./scripts/login-devtunnel.sh
-./scripts/setup-local-examples.sh --check
-./scripts/manage-local-mcp-and-ui.sh restart
+cd /path/to/voice-agent/portal
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp .env.example .env
+# Set AZURE_VOICE_AGENTS_ENDPOINT in .env.
+.venv/bin/python demo_server.py
 ```
 
-`login-devtunnel.sh` uses GitHub device-code authentication. Follow the printed
-`https://github.com/login/device` prompt. Azure operations continue to use the
-separate identity selected by `az login`.
-
-Success requires `local_mcp_and_portal=ready`. Open
-**http://localhost:18098**, then verify with:
+Open **http://127.0.0.1:9527**, then verify with:
 
 ```bash
-./scripts/manage-local-mcp-and-ui.sh status
-curl -fsS http://127.0.0.1:18003/healthz
-curl -fsS http://127.0.0.1:18098/healthz
+curl -fsS http://127.0.0.1:9527/healthz
 ```
-
-Port `9527` is only for a portal-only session without the managed local MCP
-lifecycle. Do not run a second manual portal after this quickstart.
 
 ### Choose an entry point
 
@@ -171,8 +165,8 @@ lifecycle. Do not run a second manual portal after this quickstart.
 | Collect spoken identifiers with digit recognition | [`samples/digit_recognition/README.md`](samples/digit_recognition/README.md) | Server-managed transcript lookup, silent tool calls, complete digit readback, and caller confirmation with GPT Realtime and MAI Transcribe 2 |
 | Run Data Zone and regional realtime voice agents | [`samples/realtime_datazone_voice_agent.md`](samples/realtime_datazone_voice_agent.md) | East US 2 `gpt-realtime-2.1-datazone` with US inference, Japan East `azure-realtime` with confirmed GPU routing, and eligible Central India `gpt-realtime`; model-specific voices and microphone setup |
 | Run the GPT Live terminal samples | [`samples/gpt_live/README.md`](samples/gpt_live/README.md) | Use direct Responses or managed prompt-agent delegation, stream microphone audio with the OpenAI SDK, and view independently scrollable GPT Live, delegation, and user transcripts |
-| Run the complete Finance workflow | [`docs/README.md`](docs/README.md) | Ordered subscription, MCP, sample, portal, and debugging guides |
-| Work on or deploy the Finance MCP | [`shared_mcp/README.md`](shared_mcp/README.md) | Shared MCP image, Finance routes, local Dev Tunnel hosting, and Azure Container Apps deployment |
+| Run the Finance CLI workflow | [`docs/README.md`](docs/README.md) | Ordered subscription, customer-owned MCP, CLI sample, and debugging guides |
+| Work on or deploy the Finance MCP (optional; not needed for the Portal or its Templates) | [`shared_mcp/README.md`](shared_mcp/README.md) | Customer-owned MCP source for the Finance CLI samples, local Dev Tunnel hosting, and Azure Container Apps deployment |
 | Create an IQ + voice + avatar Agent | [`samples/create_agent_with_iq_avatar_voice/README.md`](samples/create_agent_with_iq_avatar_voice/README.md) | Portal-first Andrew Dragon HD, Harry Business, Knowledge IQ, and optional Python creation |
 | Inspect SDK package information | [`dist/README.md`](dist/README.md) | Public Python and .NET SDK dependencies and historical preview build records |
 | Use the coding-agent workflows | [`skills/`](skills/) | Voice Agent creation, IQ/Toolbox provisioning, and local-session debugging |
@@ -186,8 +180,8 @@ When the user asks to run or debug something from this directory:
 2. Select the component from the table above and read its `README.md` before
    running commands.
 3. Treat **UI** without a qualifier as the general [`portal/`](portal/README.md).
-4. Treat **Finance UI**, **portal Templates with Finance**, or
-   **shared MCP UI** as the workflow documented in
+4. Treat all Portal Templates as part of the normal local Portal workflow.
+   Route explicit Finance CLI or shared MCP work to
    [`docs/03_run_samples.md`](docs/03_run_samples.md).
 5. Reuse an existing component-local `.env` and virtual environment when they
    are valid. Never copy credentials or endpoints between unrelated `.env`
@@ -206,34 +200,29 @@ verify:
 GET http://127.0.0.1:9527/healthz
 ```
 
-For the complete Finance route, follow the ordered
-[`docs/README.md`](docs/README.md) workflow. The normal lifecycle commands are:
+For the Finance CLI route, follow the ordered [`docs/README.md`](docs/README.md)
+workflow. The local MCP entry point is:
 
 ```bash
 ./scripts/setup-local-examples.sh --project-endpoint "https://<account>.services.ai.azure.com/api/projects/<project>"
-./scripts/manage-local-mcp-and-ui.sh restart
-./scripts/manage-local-mcp-and-ui.sh status
-./scripts/manage-local-mcp-and-ui.sh stop
+cd shared_mcp
+./scripts/e2e-local.sh
 ```
 
-The setup command installs Node.js 22 and the Dev Tunnel CLI under the ignored
-`.local-mcp-and-ui/tools/` directory when they are missing. It also supports
+The setup command installs the Dev Tunnel CLI under the ignored
+`.local-tools/` directory when it is missing. It also supports
 minimal Linux Python installations that provide `venv` but omit `ensurepip`:
 each component environment receives its own bootstrapped `pip`. No `sudo` or
-system package change is required for those three tools. Azure CLI must already
+system package change is required. Azure CLI must already
 be installed and authenticated; Dev Tunnel device-code authentication remains
 an explicit user action because setup must not authenticate as an identity the
 user did not choose.
 
 ### Platform support
 
-**On Windows, WSL2 is required for the combined portal + local MCP automation:**
-
-- `scripts/setup-local-examples.sh`: installs Linux tools and prepares the stack.
-- `scripts/manage-local-mcp-and-ui.sh`: starts, stops, and monitors Linux processes.
-
-Run this workflow from a checkout in the WSL Linux filesystem, such as `~/src/`,
-not `/mnt/c/`, and authenticate Azure CLI inside WSL.
+**On Windows, WSL2 is required for the Bash-based Finance MCP automation.**
+Run that workflow from a checkout in the WSL Linux filesystem, such as
+`~/src/`, not `/mnt/c/`, and authenticate Azure CLI inside WSL.
 
 **Other standalone Python and .NET samples can run natively on Windows.**
 Follow each sample's prerequisites and commands. Bash-only wrappers still need
@@ -246,8 +235,8 @@ Bash/Unix tooling or equivalent PowerShell commands.
 | [`portal/`](portal/) | General local Voice Agent portal and WebRTC UI |
 | [`samples/`](samples/) | Python, .NET, and Finance samples |
 | [`docs/`](docs/) | Finance architecture, setup, operation, and debugging guides |
-| [`shared_mcp/`](shared_mcp/) | Shared Finance MCP source, native runtime, optional container, IaC, and deployment scripts |
-| [`scripts/`](scripts/) | Finance local setup and process lifecycle entry points |
+| [`shared_mcp/`](shared_mcp/) | Optional customer-owned MCP for the Finance CLI samples: source, native runtime, container, IaC, and deployment scripts. The Portal does not use it |
+| [`scripts/`](scripts/) | Finance CLI setup and authentication helpers |
 | [`dist/`](dist/) | Public SDK package information and historical preview build records |
 | [`skills/`](skills/) | Reusable coding-agent workflows |
 | [`tests/`](tests/) | Offline contracts for the common Projects SDK samples |

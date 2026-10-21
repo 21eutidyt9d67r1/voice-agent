@@ -62,9 +62,27 @@ test("carries the prompt each node actually runs with", () => {
   assert.equal(byId[ENTRYPOINT_NODE_ID].instructions, "You are the front-line agent.");
   assert.deepEqual(byId[ENTRYPOINT_NODE_ID].tools, ["store"]);
   assert.equal(byId[ENTRYPOINT_NODE_ID].model, "gpt-realtime");
+  assert.equal(byId[ENTRYPOINT_NODE_ID].stt, "native-realtime-audio");
+  assert.equal(byId[ENTRYPOINT_NODE_ID].voiceType, "azure-standard");
   assert.match(byId.billing.instructions, /billing specialist/);
   assert.equal(byId.billing.voice, "en-US-EmmaNeural");
+  assert.equal(byId.billing.model, "gpt-realtime");
+  assert.equal(byId.billing.stt, "native-realtime-audio");
+  assert.equal(byId.billing.voiceType, "azure-standard");
   assert.equal(byId.billing.toolChoice, "auto");
+});
+
+test("retains custom speech and declared voice types for authoring and runtime price parity", () => {
+  const configured = structuredClone(definition);
+  configured.audio.input = { transcription: { model: "azure-speech", custom_speech: { endpoint_id: "example" } } };
+  configured.audio.output = { voice: "en-US-AvaNeural", voice_type: "azure-custom" };
+  configured.handoff.nodes[0].config.voice = { type: "azure-personal", name: "example-personal-voice" };
+  configured.handoff.nodes[1].config.voice = "en-US-EmmaNeural";
+  const graph = buildHandoffGraph({ definition: configured, handoffState: sessionState });
+  assert.ok(graph.nodes.every((node) => node.customSpeech));
+  assert.equal(graph.nodes.find((node) => node.id === ENTRYPOINT_NODE_ID).voiceType, "azure-custom");
+  assert.equal(graph.nodes.find((node) => node.id === configured.handoff.nodes[0].id).voiceType, "azure-personal");
+  assert.equal(graph.nodes.find((node) => node.id === configured.handoff.nodes[1].id).voiceType, "");
 });
 
 test("classifies the entrypoint and marks a node with no outgoing edge as terminal", () => {

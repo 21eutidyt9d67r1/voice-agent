@@ -2,7 +2,13 @@
 // UI draft state, not a second wire schema. serviceContract.js remains the only
 // serializer. Field ownership follows the voice-agent definition contract.
 
-import { defaultVoiceFor, modelGroups } from "../config.js";
+import {
+  defaultTranscriptionFor,
+  defaultVoiceFor,
+  isCascaded,
+  isVoiceCompatible,
+  modelGroups,
+} from "../config.js";
 import { DEFAULT_AVATAR_PRESET_ID, buildAvatarDefinition } from "./avatar.mjs";
 import { GREETING_MODES } from "./greeting.mjs";
 import { buildCustomerCareHandoff, HANDOFF_ENTRYPOINT_INSTRUCTIONS } from "./handoff.mjs";
@@ -20,6 +26,11 @@ export function createAgentDraft(cfg) {
     instructions: "",
     inferenceMode,
     model: cfg.defaultModel,
+    transcriptionModel: defaultTranscriptionFor(
+      cfg,
+      cfg.defaultModel,
+      inferenceMode === "hosted_agent",
+    ),
     voice: inferenceMode === "hosted_agent" ? azureDefaultVoice(cfg) : cfg.defaultVoice,
     targetAgentName: "",
     targetAgentVersion: "",
@@ -40,16 +51,44 @@ export function createAgentDraft(cfg) {
 
 export function updateAgentDraft(cfg, draft, field, value) {
   const next = { ...draft, [field]: value };
-  if (field === "model") next.voice = defaultVoiceFor(cfg, value);
+  if (field === "model") {
+    const azureOnly = draft.avatarEnabled || isCascaded(cfg, value);
+    next.voice = isVoiceCompatible(cfg, value, draft.voice, azureOnly)
+      ? draft.voice
+      : defaultVoiceFor(cfg, value);
+    next.transcriptionModel = defaultTranscriptionFor(
+      cfg,
+      value,
+      false,
+      draft.transcriptionModel,
+    );
+  }
   if (field === "inferenceMode") {
     if (value === "hosted_agent") {
       next.voice = azureDefaultVoice(cfg);
+      next.transcriptionModel = defaultTranscriptionFor(
+        cfg,
+        next.model,
+        true,
+        draft.transcriptionModel,
+      );
       if (next.greeting.toolChoice === "required") {
         next.greeting = { ...next.greeting, toolChoice: "auto" };
       }
     } else {
       next.model = modelGroups(cfg, value === "deployment")[0]?.items[0] || "";
-      next.voice = defaultVoiceFor(cfg, next.model);
+      next.voice = isVoiceCompatible(
+        cfg,
+        next.model,
+        draft.voice,
+        draft.avatarEnabled || isCascaded(cfg, next.model),
+      ) ? draft.voice : defaultVoiceFor(cfg, next.model);
+      next.transcriptionModel = defaultTranscriptionFor(
+        cfg,
+        next.model,
+        false,
+        draft.transcriptionModel,
+      );
     }
   }
   if (field === "avatarEnabled" && value) {
@@ -68,6 +107,7 @@ export function draftCreateOptions(draft, tools, subagents, structuredInputs) {
     instructions: hosted ? undefined : draft.instructions,
     inferenceMode: draft.inferenceMode,
     model: draft.model,
+    inputTranscriptionModel: draft.transcriptionModel,
     voice: draft.voice,
     store: draft.store,
     clientReferenceEc: draft.clientReferenceEc,

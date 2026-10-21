@@ -17,10 +17,16 @@ Do not remove either transport based only on a successful Portal probe. A
 Streamable HTTP probe can pass while a handoff target still fails to activate
 through legacy SSE.
 
-Every Portal example uses a `managed` connection. A customer may create a new
-Foundry Project, run or deploy this server, and let the Portal create the
-required RemoteTool connections in that Project. No example depends on a
-connection pre-created in a Microsoft test Project.
+**You do not need to start this server to use the Portal or its Templates.**
+Every Portal Template uses the public no-auth service configured in
+[`portal/templates.config.json`](../portal/templates.config.json), with no
+Project connections. Start or deploy this runtime only for the Finance CLI
+samples, or to host the Finance and Elevator routes yourself.
+
+This directory remains the source for those business packs. It also holds the
+[`mock_tool_call`](app/shared_mcp/mock_tool_call/README.md) pack behind the
+Templates' `/mcp/mock-tool-call` route used by Examples 5–34; the runtime here
+does not serve that route.
 
 The elevator-service route exposes explicitly named
 `mock_zendesk_create_ticket` and `mock_zendesk_get_ticket_status` tools backed
@@ -37,18 +43,14 @@ and lifecycle scripts do not require or invoke Docker. The separate
 and testing the optional container image; Azure Container Apps deployment uses
 the remote build configured in `azure.yaml`.
 
-For the normal portal + local MCP workflow, run from `VoiceAgent/`:
+For independent local MCP development, run from `VoiceAgent/shared_mcp/`:
 
 ```bash
-./scripts/setup-local-examples.sh \
-	--project-endpoint "https://<account>.services.ai.azure.com/api/projects/<project>"
-./scripts/login-devtunnel.sh
-./scripts/setup-local-examples.sh --check
-./scripts/manage-local-mcp-and-ui.sh restart
+./scripts/e2e-local.sh
 ```
 
-The login wrapper uses GitHub device-code authentication. Do not start
-`e2e-local.sh` separately when the manager owns the stack.
+This starts the reference MCP and its Dev Tunnel for CLI sample development;
+it does not change the Portal's default public MCP configuration.
 
 For startup, local hosting, Azure deployment, configuration, and modification
 instructions, use [02: MCP settings](../docs/02_mcp_settings.md).
@@ -77,7 +79,7 @@ post-tool response failure, use the shared
 
 ```bash
 cd VoiceAgent
-./scripts/manage-local-mcp-and-ui.sh status
+curl -fsS http://127.0.0.1:18003/healthz
 python skills/debug-local-session/scripts/analyze_session.py --list
 ```
 
@@ -85,5 +87,5 @@ For `handoff_target_activation_failed` or `handoff_target_prepare_timeout`,
 correlate the session timestamp with the newest
 `state/e2e/<UTC-run>/native-mcp.log`. The healthy Foundry sequence is `GET 200`,
 message `POST 202`, `ListToolsRequest`, and then `CallToolRequest` when the node
-invokes a tool. `.local-mcp-and-ui/mcp.log` is manager/startup output and may
+invokes a tool. The E2E terminal output covers startup and may
 not contain the HTTP requests needed for this diagnosis.

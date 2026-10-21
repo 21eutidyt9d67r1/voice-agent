@@ -25,6 +25,8 @@ from azure.identity.aio import (
 from dotenv import dotenv_values
 from websockets.asyncio.client import connect
 
+from voice_agent_definition import materialize_handoff_instruction_inheritance
+
 
 TOKEN_SCOPE = "https://ai.azure.com/.default"
 VOICE_AGENT_FEATURE = "VoiceAgents=V1Preview"
@@ -310,6 +312,7 @@ def load_materialized_agent(
         tool.pop("authorization", None)
         tool.pop("headers", None)
 
+    materialize_handoff_instruction_inheritance(definition)
     description = str(document.get("description") or "").strip()
     return agent_name, description, definition
 

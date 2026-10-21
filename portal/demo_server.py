@@ -1,9 +1,8 @@
 # Copyright (c) Microsoft. All rights reserved.
 """Standalone, local-only Voice Agent portal.
 
-The React studio and service-shaped REST/WebSocket bridge are ported from the
-upstream demo. See UPSTREAM.json for the exact source and CHANGELOG.md for the
-public-repository adaptations. Run `python demo_server.py --help` or see README.md.
+Serves the React studio, Editor, and service-shaped REST/WebSocket bridge to
+your Azure Foundry project. Run `python demo_server.py --help` or see README.md.
 """
 from __future__ import annotations
 
@@ -13,6 +12,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import urllib.parse
 import uuid
 from logging.handlers import RotatingFileHandler
@@ -47,8 +47,14 @@ except ImportError:
     )
 
 try:
+    from .handoff_portal import install_handoff_routes
+except ImportError:
+    from handoff_portal import install_handoff_routes
+
+try:
     from .common import (
         AZURE_VOICES,
+        CASCADED_TRANSCRIPTION_MODELS,
         CASCADED_MODELS,
         DEFAULT_AZURE_VOICE,
         FOUNDRY_FEATURES,
@@ -56,6 +62,7 @@ try:
         MODELS,
         OPENAI_VOICES,
         REALTIME_MODELS,
+        TRANSCRIPTION_MODELS,
         AgentsConfig,
         build_voice_config,
         list_byom_deployments,
@@ -65,6 +72,7 @@ try:
 except ImportError:
     from common import (
         AZURE_VOICES,
+        CASCADED_TRANSCRIPTION_MODELS,
         CASCADED_MODELS,
         DEFAULT_AZURE_VOICE,
         FOUNDRY_FEATURES,
@@ -72,6 +80,7 @@ except ImportError:
         MODELS,
         OPENAI_VOICES,
         REALTIME_MODELS,
+        TRANSCRIPTION_MODELS,
         AgentsConfig,
         build_voice_config,
         list_byom_deployments,
@@ -87,10 +96,20 @@ STRUCTURED_INPUT_QUERY_PARAMETER = "structured_input"
 STRUCTURED_INPUT_HEADER = "x-ms-voice-structured-inputs"
 MAX_STRUCTURED_INPUT_BYTES = 32 * 1024
 REDACTED_QUERY_VALUE = "<redacted>"
+VOICE_WS_BASE_ENV = "VOICE_DEMO_VOICE_WS_BASE"
+PORTAL_REQUEST_ID_HEADER = "X-Portal-Request-Id"
+# Upper bound for forwarding already-received service events after the service closes.
+UPSTREAM_CLOSE_DRAIN_SECONDS = 10
 _SENSITIVE_QUERY_KEYS = frozenset({
     STRUCTURED_INPUT_QUERY_PARAMETER, "authorization", "access_token", "token",
     "api_key", "api-key", "key", "sig", "password", "client_secret",
 })
+_SENSITIVE_ERROR_VALUE = re.compile(
+    r"(?i)\b(authorization|access[_-]?token|api[_-]?key|client[_-]?secret|"
+    r"password|sig)\b(\s*[:=]\s*)([^\s,;&]+)"
+)
+_BEARER_VALUE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+_MAX_PUBLIC_ERROR_LENGTH = 1200
 
 
 class ProjectWebSocketConnect(websockets.connect):
@@ -106,8 +125,43 @@ PROJECT_CONFIGS_KEY = web.AppKey("voice_portal_project_configs", dict)
 # None disables recording; the demo still runs, it just leaves nothing behind.
 SESSION_LOG_ROOT = web.AppKey("voice_demo_session_log_root", object)
 LIVE_SOCKETS_KEY = web.AppKey("voice_portal_live_sockets", set)
+VOICE_WS_BASE_KEY = web.AppKey("voice_portal_voice_ws_base", str)
+REQUEST_ID_KEY = web.RequestKey("voice_portal_request_id", str)
 PROJECT_COOKIE = "voice_agent_portal_project"
 LOGGER = logging.getLogger("voice_agent_portal")
+
+
+def _request_id(request: web.Request) -> str:
+    return request.get(REQUEST_ID_KEY, "")
+
+
+def _safe_exception_text(error: Exception) -> str:
+    message = " ".join(str(error).split())
+    message = _BEARER_VALUE.sub("Bearer <redacted>", message)
+    message = _SENSITIVE_ERROR_VALUE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}<redacted>",
+        message,
+    )
+    message = message[:_MAX_PUBLIC_ERROR_LENGTH]
+    return f"{type(error).__name__}: {message}" if message else type(error).__name__
+
+
+def _error_response(
+    request: web.Request,
+    message: str,
+    *,
+    status: int,
+    code: str,
+) -> web.Response:
+    return web.json_response(
+        {
+            "error": message,
+            "code": code,
+            "request_id": _request_id(request),
+        },
+        status=status,
+    )
+
 
 async def _request_config(request: web.Request) -> AgentsConfig:
     default = request.app[DEFAULT_CONFIG_KEY]
@@ -141,6 +195,10 @@ _ASSET_FILENAMES = (
     "templates.html", "template-app.js", "template-graph.js", "template-styles.css",
     "THIRD_PARTY_NOTICES.txt",
 )
+_HANDOFF_ASSET_FILENAMES = (
+    "handoff/handoff.html", "handoff/handoff-app.js",
+    "handoff/handoff-core.mjs", "handoff/handoff.css",
+)
 
 
 def _asset_version() -> str:
@@ -150,6 +208,11 @@ def _asset_version() -> str:
         path = STATIC_DIR / filename
         stamps.append(str(int(path.stat().st_mtime)) if path.exists() else "0")
     return "-".join(stamps)
+
+
+async def portal_home(request: web.Request) -> web.Response:
+    path = "/demo/" if request.query.get("agent") else "/editor/"
+    raise web.HTTPFound(location=str(request.rel_url.with_path(path, keep_query=True)))
 
 
 async def index(request: web.Request) -> web.Response:
@@ -357,6 +420,9 @@ async def config(request: web.Request) -> web.Response:
         "byomCascadedModels": [item["deployment"] for item in deployed["cascaded"]],
         "openaiVoices": OPENAI_VOICES,
         "azureVoices": AZURE_VOICES,
+        "transcriptionModels": TRANSCRIPTION_MODELS,
+        "realtimeTranscriptionModels": TRANSCRIPTION_MODELS,
+        "cascadedTranscriptionModels": CASCADED_TRANSCRIPTION_MODELS,
         "defaultModel": cfg.voice_model,
         "defaultVoice": cfg.voice,
         "defaultAzureVoice": cfg.voice if "-" in cfg.voice else DEFAULT_AZURE_VOICE,
@@ -384,6 +450,7 @@ async def config(request: web.Request) -> web.Response:
         "project": f"{cfg.account}@{cfg.project}",
         "traceEnabled": bool(cfg.subscription and cfg.resource_group),
         "mcpProbeEnabled": True,
+        "voiceWsOverride": request.app[VOICE_WS_BASE_KEY],
         "notice": (
             "Azure Foundry project — requests use your server-side identity and may incur charges. "
             "Preview feature availability depends on your project. Created agents are retained."
@@ -454,6 +521,36 @@ def _structured_input_header(raw: str | None) -> str | None:
     return value
 
 
+def _local_voice_ws_base(value: str) -> str:
+    """Validate the loopback shim base used only by the voice WebSocket."""
+    value = value.strip().rstrip("/")
+    if not value:
+        return ""
+    parsed = urllib.parse.urlsplit(value)
+    try:
+        parsed.port
+    except ValueError as error:
+        raise ValueError(
+            f"{VOICE_WS_BASE_ENV} must contain a valid port."
+        ) from error
+    if (
+        parsed.scheme not in {"http", "https", "ws", "wss"}
+        or parsed.hostname not in {"127.0.0.1", "::1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not re.fullmatch(
+            r"/api/projects/[A-Za-z0-9][A-Za-z0-9._-]*",
+            parsed.path,
+        )
+    ):
+        raise ValueError(
+            f"{VOICE_WS_BASE_ENV} must be a loopback URL ending in /api/projects/<project>."
+        )
+    return value
+
+
 def build_upstream_ws_headers(cfg: AgentsConfig, query) -> dict[str, str]:
     """Translate browser-only query overrides into the service's supported upgrade headers."""
     structured_input = _structured_input_header(query.get(STRUCTURED_INPUT_QUERY_PARAMETER))
@@ -466,7 +563,13 @@ def build_upstream_ws_headers(cfg: AgentsConfig, query) -> dict[str, str]:
     return headers
 
 
-def build_upstream_ws_url(cfg: AgentsConfig, path: str, query) -> tuple[str, str]:
+def build_upstream_ws_url(
+    cfg: AgentsConfig,
+    path: str,
+    query,
+    *,
+    voice_ws_base: str = "",
+) -> tuple[str, str]:
     """Build the upstream voice WS URL, defaulting api-version + agent_session_id.
 
     Voice/structured-input overrides use headers. The deployed Foundry WS endpoint rejects the
@@ -478,7 +581,9 @@ def build_upstream_ws_url(cfg: AgentsConfig, path: str, query) -> tuple[str, str
     q = {k: v for k, v in query.items() if k not in header_params}
     q.setdefault("api-version", cfg.api_version)
     q.setdefault("agent_session_id", f"web-{uuid.uuid4().hex[:8]}")
-    url = f"{cfg.ws_agents_base}{path}?{urllib.parse.urlencode(q)}"
+    ws_base = voice_ws_base or cfg.ws_agents_base
+    ws_base = ws_base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+    url = f"{ws_base}{path}?{urllib.parse.urlencode(q)}"
     return url, q["agent_session_id"]
 
 
@@ -486,21 +591,14 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
     """Step 2: bridge the browser WebSocket to the chosen agent's protocols/voice endpoint."""
     cfg = await _request_config(request)
     _log_api(request, cfg)
+    voice_override = (request.query.get("voiceOverride") or "").strip()
     try:
         _structured_input_header(request.query.get(STRUCTURED_INPUT_QUERY_PARAMETER))
+        if voice_override:
+            _voice_override_header(voice_override)
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     agent_name = request.match_info.get("agent")
-    # Browser WebSockets cannot supply custom headers. Validate and translate overrides before
-    # accepting the browser upgrade, so malformed input never opens an upstream connection.
-    voice_override = (request.query.get("voiceOverride") or "").strip()
-    try:
-        headers = await asyncio.to_thread(build_upstream_ws_headers, cfg, request.query)
-    except ValueError as exc:
-        raise web.HTTPBadRequest(text=str(exc)) from exc
-    except Exception as exc:
-        LOGGER.error("[bridge] authentication failed: %s", type(exc).__name__)
-        raise web.HTTPBadGateway(text="Azure authentication failed. Check az login and project access.") from None
 
     browser_ws = web.WebSocketResponse(max_msg_size=16 * 1024 * 1024)
     await browser_ws.prepare(request)
@@ -513,7 +611,12 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
 
     # Keep voiceOverride and structured_input out of the public upstream URL; their values are
     # carried in headers instead. The remaining service query parameters keep their native shape.
-    url, session_id = build_upstream_ws_url(cfg, request.rel_url.raw_path, request.rel_url.query)
+    url, session_id = build_upstream_ws_url(
+        cfg,
+        request.rel_url.raw_path,
+        request.rel_url.query,
+        voice_ws_base=request.app[VOICE_WS_BASE_KEY],
+    )
     LOGGER.info(
         "[bridge] browser connected; upstream %s (agent=%s, voiceOverride=%s, session=%s)",
         url.split("?")[0],
@@ -547,6 +650,10 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
     upstream_close_code = 1000
     upstream_close_reason = ""
     try:
+        # Browser JavaScript cannot read an HTTP body from a failed WebSocket upgrade.
+        # Acquire credentials only after accepting the local socket so authentication and
+        # upstream connection failures can be sent to the page as structured error events.
+        headers = await asyncio.to_thread(build_upstream_ws_headers, cfg, request.query)
         # open_timeout must be generous: a BYOM (self_deployed) connect makes the Agents service resolve
         # the customer's cognitive resource + mint a model-auth token before it accepts the upstream WS
         # upgrade, which is markedly slower than the managed path. The websockets default (10s) is too short
@@ -559,12 +666,23 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
             "ping_timeout": 60,
         }
         async with ProjectWebSocketConnect(url, additional_headers=headers, **connect_kwargs) as upstream:
+            downstream_done = asyncio.Event()
+
             async def browser_to_upstream():
                 async for msg in browser_ws:
                     if msg.type in (WSMsgType.TEXT, WSMsgType.BINARY):
                         if recorder:
                             recorder.record("up", msg.data)
-                        await upstream.send(msg.data)
+                        try:
+                            await upstream.send(msg.data)
+                        except websockets.exceptions.ConnectionClosed:
+                            # The service closed while the microphone was still streaming,
+                            # e.g. after end_conversation. Let upstream_to_browser forward
+                            # what the service sent before closing, such as the final audio.
+                            await asyncio.wait_for(
+                                downstream_done.wait(), UPSTREAM_CLOSE_DRAIN_SECONDS,
+                            )
+                            raise
                     elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.ERROR):
                         break
 
@@ -582,6 +700,7 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
                     if upstream.close_code is not None:
                         upstream_close_code = int(upstream.close_code)
                     upstream_close_reason = upstream.close_reason or ""
+                    downstream_done.set()
 
             t1 = asyncio.create_task(browser_to_upstream())
             t2 = asyncio.create_task(upstream_to_browser())
@@ -597,12 +716,22 @@ async def bridge(request: web.Request) -> web.WebSocketResponse:
     except websockets.exceptions.ConnectionClosedOK:
         LOGGER.info("[bridge] upstream closed normally")
     except Exception as exc:  # noqa: BLE001 - surface bridge errors to the page
-        bridge_error = type(exc).__name__
-        LOGGER.error("[bridge] error: %s", bridge_error)
+        bridge_error = _safe_exception_text(exc)
+        request_id = _request_id(request)
+        LOGGER.error(
+            "[request:%s] [bridge] error: %s",
+            request_id,
+            bridge_error,
+        )
         if not browser_ws.closed:
             await browser_ws.send_json({
                 "type": "error",
-                "error": {"message": "Voice connection failed. Check Azure project access, agent settings, and network connectivity."},
+                "error": {
+                    "code": "portal_bridge_error",
+                    "message": f"Voice connection failed: {bridge_error}",
+                    "type": type(exc).__name__,
+                    "request_id": request_id,
+                },
             })
         upstream_close_code = 1011
     finally:
@@ -632,6 +761,7 @@ async def local_boundary(request: web.Request, handler):
     This is a single-user local sample, not authentication for remote deployment.
     Only loopback listeners and same-origin browser requests are supported.
     """
+    request[REQUEST_ID_KEY] = uuid.uuid4().hex[:12]
     try:
         host = urllib.parse.urlsplit(f"http://{request.host}")
         if host.hostname not in {"127.0.0.1", "::1", "localhost"} or host.username or host.path:
@@ -639,23 +769,63 @@ async def local_boundary(request: web.Request, handler):
         if request.remote and not ipaddress.ip_address(request.remote).is_loopback:
             raise ValueError
     except ValueError:
-        return web.json_response({"error": "This portal only accepts localhost requests."}, status=403)
+        return _error_response(
+            request,
+            "This portal only accepts localhost requests.",
+            status=403,
+            code="localhost_required",
+        )
     origin = request.headers.get("Origin")
     if origin is not None and origin != f"{request.scheme}://{request.host}":
-        return web.json_response({"error": "Cross-origin requests are not allowed."}, status=403)
+        return _error_response(
+            request,
+            "Cross-origin requests are not allowed.",
+            status=403,
+            code="cross_origin_denied",
+        )
     if request.headers.get("Sec-Fetch-Site") == "cross-site":
-        return web.json_response({"error": "Cross-site requests are not allowed."}, status=403)
+        return _error_response(
+            request,
+            "Cross-site requests are not allowed.",
+            status=403,
+            code="cross_site_denied",
+        )
     for value in request.match_info.values():
         if value in {".", ".."} or "/" in value or "\\" in value:
-            return web.json_response({"error": "Invalid path component."}, status=400)
+            return _error_response(
+                request,
+                "Invalid path component.",
+                status=400,
+                code="invalid_path",
+            )
     if request.method == "POST" and request.content_type != "application/json":
-        return web.json_response({"error": "POST requests require application/json."}, status=415)
+        return _error_response(
+            request,
+            "POST requests require application/json.",
+            status=415,
+            code="json_required",
+        )
     try:
         return await handler(request)
     except web.HTTPException as exc:
         if exc.status < 400:
             raise
-        return web.json_response({"error": exc.text or exc.reason}, status=exc.status)
+        return _error_response(
+            request,
+            exc.text or exc.reason,
+            status=exc.status,
+            code=f"http_{exc.status}",
+        )
+    except Exception as exc:  # noqa: BLE001 - convert backend failures into a visible API contract
+        detail = _safe_exception_text(exc)
+        request_id = _request_id(request)
+        LOGGER.error("[request:%s] unhandled request error: %s", request_id, detail)
+        return _error_response(
+            request,
+            f"Portal backend failed: {detail}. Request ID: {request_id}.",
+            status=500,
+            code="portal_internal_error",
+        )
 
 
 async def security_headers(request: web.Request, response: web.StreamResponse) -> None:
@@ -671,6 +841,9 @@ async def security_headers(request: web.Request, response: web.StreamResponse) -
             "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         ),
     })
+    request_id = _request_id(request)
+    if request_id:
+        response.headers[PORTAL_REQUEST_ID_HEADER] = request_id
 
 
 async def health(request: web.Request) -> web.Response:
@@ -765,11 +938,15 @@ def build_app(args) -> web.Application:
     app[DEFAULT_CONFIG_KEY] = cfg
     app[PROJECT_CONFIGS_KEY] = {}
     app[LIVE_SOCKETS_KEY] = set()
+    app[VOICE_WS_BASE_KEY] = _local_voice_ws_base(
+        os.getenv(VOICE_WS_BASE_ENV, "")
+    )
     root = args.data_dir / "sessions" if args.record_sessions else None
     if root is not None:
         root.mkdir(parents=True, exist_ok=True)
     app[SESSION_LOG_ROOT] = root
-    for path in ("/", "/demo", "/demo/"):
+    app.router.add_get("/", portal_home)
+    for path in ("/demo", "/demo/"):
         app.router.add_get(path, index)
     for path in ("/webrtc", "/webrtc/", "/demo/webrtc", "/demo/webrtc/"):
         app.router.add_get(path, webrtc_index)
@@ -787,6 +964,7 @@ def build_app(args) -> web.Application:
         model_override=args.model or "",
         template_config_path=args.template_config,
     )
+    install_handoff_routes(app)
     app.router.add_get("/api/demo/sessions", demo_sessions)
     app.router.add_get("/api/demo/sessions/{run_id}", demo_session_detail)
     app.router.add_get("/api/demo/sessions/{run_id}/events", demo_session_events)
@@ -883,7 +1061,8 @@ def main() -> None:
     os.umask(0o077)
     args = parse_args()
     configure_file_logging(args.data_dir)
-    if any(not (STATIC_DIR / name).is_file() for name in _ASSET_FILENAMES):
+    required_assets = (*_ASSET_FILENAMES, *_HANDOFF_ASSET_FILENAMES)
+    if any(not (STATIC_DIR / name).is_file() for name in required_assets):
         raise SystemExit(
             "Missing browser assets or third-party notices. Restore the shipped static files; "
             "to rebuild JavaScript/CSS, run `npm ci` then `npm run build:all` in portal/web."
@@ -894,6 +1073,11 @@ def main() -> None:
         raise SystemExit(f"Configuration error: {exc}") from None
     cfg = app[DEFAULT_CONFIG_KEY]
     LOGGER.info("Project  : %s", cfg.host)
+    if app[VOICE_WS_BASE_KEY]:
+        LOGGER.info(
+            "Voice WS : %s (REST remains on the selected Foundry project)",
+            app[VOICE_WS_BASE_KEY],
+        )
     LOGGER.info(
         "Azure calls use your identity and may incur charges. Agents are retained on shutdown."
     )

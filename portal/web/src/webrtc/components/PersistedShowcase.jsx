@@ -7,7 +7,7 @@ import { MiniPortal } from "./MiniPortal.jsx";
 
 const enc = encodeURIComponent;
 
-export function PersistedShowcase({ cfg, agent, conversationId, onRestart }) {
+export function PersistedShowcase({ cfg, agent, conversationId, onRestart, debugMode = false }) {
   const agentName = agent && agent.name;
   const apiVersion = (cfg && cfg.apiVersion) || "v1";
   const foundryFeatures = (cfg && cfg.foundryFeatures) || "VoiceAgents=V1Preview";
@@ -195,6 +195,7 @@ export function PersistedShowcase({ cfg, agent, conversationId, onRestart }) {
 
   return (
     <MiniPortal
+      debugMode={debugMode}
       items={items}
       conversation={conv}
       responsesById={responses}

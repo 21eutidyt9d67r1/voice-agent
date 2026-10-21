@@ -13,6 +13,7 @@ const ICONS = {
   workflow: <><rect x="8" y="2" width="8" height="5" rx="1.5" /><rect x="2" y="17" width="8" height="5" rx="1.5" /><rect x="14" y="17" width="8" height="5" rx="1.5" /><path d="M12 7v5M6 17v-5h12v5" /></>,
   flask: <><path d="M9 3h6m-5 0v6l-6 10a1.3 1.3 0 0 0 1 2h14a1.3 1.3 0 0 0 1-2L14 9V3M7 15h10" /></>,
   settings: <><path d="M3 6h6m4 0h8M3 12h12m4 0h2M3 18h2m4 0h12" /><circle cx="11" cy="6" r="2" /><circle cx="17" cy="12" r="2" /><circle cx="7" cy="18" r="2" /></>,
+  search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 5 5" /></>,
   refresh: <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" /></>,
   code: <><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16" /></>,
   arrow: <><path d="M4 12h16m-6-6 6 6-6 6" /></>,
@@ -65,12 +66,21 @@ export function Toggle({ label, description, checked, onChange, disabled }) {
 }
 
 export function GroupedSelect({ groups, placeholder, ...props }) {
+  const itemValue = (item) => typeof item === "object" ? item.value : item;
+  const current = props.value && !groups.some(
+    (group) => group.items.some((item) => itemValue(item) === props.value),
+  );
   return (
     <select {...props}>
       {placeholder ? <option value="">{placeholder}</option> : null}
+      {current ? <option value={props.value}>{props.value} · current configuration</option> : null}
       {groups.map((group) => (
         <optgroup key={group.label} label={group.label}>
-          {group.items.map((item) => <option key={item} value={item}>{item}</option>)}
+          {group.items.map((item) => {
+            const value = itemValue(item);
+            const label = typeof item === "object" ? item.label : item;
+            return <option key={value} value={value} disabled={Boolean(item?.disabled)}>{label}</option>;
+          })}
         </optgroup>
       ))}
     </select>

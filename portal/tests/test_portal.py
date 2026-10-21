@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from aiohttp import WSMsgType, web
-from aiohttp.test_utils import TestClient, TestServer
+from aiohttp.test_utils import TestClient, TestServer, make_mocked_request
 from websockets.exceptions import ConnectionClosedOK
 from websockets.frames import Close
 
@@ -172,6 +172,39 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(json.loads(headers[server.STRUCTURED_INPUT_HEADER]), {"name": "你好"})
         self.assertEqual(json.loads(headers[server.VOICE_OVERRIDE_HEADER])["audio"]["output"], {"voice": "alloy", "voice_type": "openai"})
 
+    def test_ws_url_can_target_local_shim_without_changing_rest_base(self):
+        cfg = common.AgentsConfig.from_endpoint(ENDPOINT)
+        url, _ = server.build_upstream_ws_url(
+            cfg,
+            VOICE_PATH,
+            {},
+            voice_ws_base="http://127.0.0.1:8099/api/projects/local",
+        )
+
+        self.assertEqual(cfg.agents_base, ENDPOINT)
+        self.assertTrue(
+            url.startswith(
+                "ws://127.0.0.1:8099/api/projects/local" + VOICE_PATH
+            )
+        )
+
+    def test_ws_override_accepts_only_local_project_base(self):
+        self.assertEqual(
+            server._local_voice_ws_base(
+                "http://localhost:8099/api/projects/local/"
+            ),
+            "http://localhost:8099/api/projects/local",
+        )
+        for value in (
+            "https://example.com/api/projects/local",
+            "http://user:password@localhost:8099/api/projects/local",
+            "http://localhost:8099/api/projects/local/agents",
+            "http://localhost:bad/api/projects/local",
+            "http://localhost:8099/api/projects/local?token=secret",
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                server._local_voice_ws_base(value)
+
 
 class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -235,7 +268,14 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.client.close)
 
     async def test_pages_and_configuration_require_the_configured_project(self):
-        for path in ("/", "/demo/", "/webrtc", "/static/demo/sessions.html", "/static/demo/persisted.html"):
+        for path in (
+            "/",
+            "/demo/",
+            "/webrtc",
+            "/editor/",
+            "/static/demo/sessions.html",
+            "/static/demo/persisted.html",
+        ):
             response = await self.client.get(path)
             self.assertEqual(response.status, 200, path)
             self.assertEqual(response.headers["X-Frame-Options"], "DENY")
@@ -252,6 +292,12 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Azure Foundry project", cfg["notice"])
         self.assertNotIn("offline", json.dumps(cfg).lower())
         self.assertFalse(cfg["defaultStore"])
+        self.assertIn("whisper-1", cfg["realtimeTranscriptionModels"])
+        self.assertNotIn("whisper-1", cfg["cascadedTranscriptionModels"])
+        self.assertEqual(
+            cfg["cascadedTranscriptionModels"],
+            ["azure-speech", "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming"],
+        )
         self.cfg._credential.get_token.assert_not_called()
         self.assertEqual(self.calls, [])
 
@@ -392,6 +438,24 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.redirect_targets, [])
         self.assertEqual(len(self.socket_requests), 1)
 
+    async def test_backend_websocket_failure_reaches_browser_with_request_id(self):
+        with patch.object(
+            self.cfg,
+            "ws_headers",
+            side_effect=RuntimeError(
+                "synthetic credential failure authorization=private-token"
+            ),
+        ):
+            async with self.client.ws_connect(VOICE_PATH) as ws:
+                event = await ws.receive_json(timeout=3)
+
+        self.assertEqual(event["type"], "error")
+        self.assertEqual(event["error"]["code"], "portal_bridge_error")
+        self.assertEqual(event["error"]["type"], "RuntimeError")
+        self.assertIn("synthetic credential failure", event["error"]["message"])
+        self.assertNotIn("private-token", json.dumps(event))
+        self.assertRegex(event["error"]["request_id"], r"^[0-9a-f]{12}$")
+
     async def test_agent_close_preserves_completion_and_audio_drain_reason(self):
         async with self.client.ws_connect(VOICE_PATH + "?agent_end=1") as ws:
             self.assertEqual((await ws.receive_json(timeout=3))["type"], "session.created")
@@ -402,6 +466,11 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_normal_upstream_close_during_browser_send_is_not_an_error(self):
         close = Close(1001, "Conversation ended by agent")
+        final_audio = [
+            json.dumps({"type": "response.output_audio.delta", "delta": "final-1"}),
+            json.dumps({"type": "response.output_audio.delta", "delta": "final-2"}),
+        ]
+        sent = asyncio.Event()
 
         class ClosingUpstream:
             close_code = close.code
@@ -411,10 +480,15 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
                 return self
 
             async def __anext__(self):
-                await asyncio.sleep(10)
+                # Like websockets, deliver frames received before the close, then stop.
+                await sent.wait()
+                if final_audio:
+                    await asyncio.sleep(0.05)
+                    return final_audio.pop(0)
                 raise StopAsyncIteration
 
             async def send(self, _data):
+                sent.set()
                 raise ConnectionClosedOK(close, close, True)
 
         class ClosingConnect:
@@ -427,6 +501,9 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(server, "ProjectWebSocketConnect", return_value=ClosingConnect()):
             async with self.client.ws_connect(VOICE_PATH) as ws:
                 await ws.send_json({"type": "input_audio_buffer.append", "audio": "fixture"})
+                # The microphone send fails first; the final audio must still arrive.
+                for expected in ("final-1", "final-2"):
+                    self.assertEqual(expected, (await ws.receive_json(timeout=3))["delta"])
                 message = await ws.receive(timeout=3)
                 self.assertEqual(message.type, WSMsgType.CLOSE)
                 self.assertEqual(message.data, 1001)
@@ -437,6 +514,31 @@ class LiveProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 400)
         self.cfg._credential.get_token.assert_not_called()
         self.assertEqual(self.socket_requests, [])
+
+    async def test_unhandled_http_failure_returns_visible_json_error(self):
+        async def fail(_request):
+            raise RuntimeError(
+                "synthetic backend failure authorization=private-token"
+            )
+
+        request = make_mocked_request(
+            "GET",
+            "/synthetic-failure",
+            headers={"Host": "127.0.0.1"},
+        )
+        response = await server.local_boundary(request, fail)
+        payload = json.loads(response.text)
+
+        self.assertEqual(response.status, 500)
+        self.assertEqual(payload["code"], "portal_internal_error")
+        self.assertIn("synthetic backend failure", payload["error"])
+        self.assertNotIn("private-token", response.text)
+        self.assertRegex(payload["request_id"], r"^[0-9a-f]{12}$")
+        await server.security_headers(request, response)
+        self.assertEqual(
+            response.headers[server.PORTAL_REQUEST_ID_HEADER],
+            payload["request_id"],
+        )
 
 
 class RecordingTests(unittest.TestCase):

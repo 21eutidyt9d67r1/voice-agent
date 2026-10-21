@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   addResponseUsage,
+  abortServerContinuation,
   applyResponseServerTiming,
   buildAllTurnLatencyTable,
   buildLatencySumAnalysis,
@@ -13,6 +14,7 @@ import {
   finishToolCall,
   formatMetricMs,
   indexSessionTools,
+  inputPcmSentAtMs,
   LATENCY_VISUAL_REFERENCE_MS,
   latencyBarPercent,
   latencyRulerTicks,
@@ -20,9 +22,12 @@ import {
   markFirstPlayback,
   markFirstSpeech,
   markFirstToken,
+  markServerContinuationPending,
+  markServerContinuationTargetReady,
   markSpeechStopped,
   markTimeoutTriggered,
   pcmVoiceOffsetsMs,
+  recordInputPcmPacket,
   shouldFinalizeOnResponseDone,
   snapshotTurnMetrics,
   startAssistantResponse,
@@ -389,6 +394,58 @@ test("accumulates usage and carries a tool duration into the follow-up answer", 
   );
 });
 
+test("keeps one user turn across a server-owned handoff response", () => {
+  const turn = createTurnTracker(1000, "user_pcm_sent");
+  startAssistantResponse(turn, "response-handoff", 1100);
+  markServerContinuationPending(turn);
+
+  assert.equal(shouldFinalizeOnResponseDone(turn), false);
+
+  markServerContinuationTargetReady(turn);
+  startAssistantResponse(turn, "response-target", 5000);
+  markFirstAudio(turn, 5100);
+  markFirstSpeech(turn, 5110);
+  markFirstPlayback(turn, 5120);
+
+  assert.equal(shouldFinalizeOnResponseDone(turn), true);
+  const snapshot = snapshotTurnMetrics(turn);
+  assert.equal(snapshot.startSource, "user_pcm_sent");
+  assert.equal(snapshot.endToEndMs, 4120);
+  assert.equal(turn.responseStarts.length, 2);
+});
+
+test("does not finalize a spoken transfer message before the target response", () => {
+  const turn = createTurnTracker(1000, "user_pcm_sent");
+  startAssistantResponse(turn, "response-handoff", 1100);
+  markServerContinuationPending(turn);
+  markFirstAudio(turn, 1200);
+  markFirstSpeech(turn, 1210);
+  markFirstPlayback(turn, 1220);
+
+  assert.equal(shouldFinalizeOnResponseDone(turn), false);
+  assert.equal(turn.responseDoneWhileContinuationPending, true);
+
+  markServerContinuationTargetReady(turn);
+  startAssistantResponse(turn, "response-target", 5000);
+  assert.equal(turn.serverContinuationPending, false);
+  assert.equal(turn.responseDoneWhileContinuationPending, false);
+  assert.equal(shouldFinalizeOnResponseDone(turn), true);
+});
+
+test("finalizes a suppressed transfer response when handoff aborts", () => {
+  const turn = createTurnTracker(1000, "user_pcm_sent");
+  startAssistantResponse(turn, "response-handoff", 1100);
+  markServerContinuationPending(turn);
+  markFirstAudio(turn, 1200);
+  markFirstSpeech(turn, 1210);
+  markFirstPlayback(turn, 1220);
+
+  assert.equal(shouldFinalizeOnResponseDone(turn), false);
+  assert.equal(abortServerContinuation(turn), true);
+  assert.equal(turn.serverContinuationPending, false);
+  assert.equal(shouldFinalizeOnResponseDone(turn), true);
+});
+
 test("distinguishes consecutive response.created events from model-to-speech time", () => {
   const turn = createTurnTracker(1000, "user_last_voiced");
   startAssistantResponse(turn, "response-one", 1100);
@@ -459,6 +516,41 @@ test("detects first and last voiced PCM frames", () => {
     firstVoicedMs: 20,
     lastVoicedMs: 40,
   });
+});
+
+test("does not move the user turn boundary for a single silence spike", () => {
+  const samples = new Int16Array(480);
+  samples[240] = 1200;
+
+  assert.deepEqual(pcmVoiceOffsetsMs(new Uint8Array(samples.buffer)), {
+    durationMs: 20,
+    firstVoicedMs: null,
+    lastVoicedMs: null,
+  });
+});
+
+test("still detects a quiet sustained PCM speech frame", () => {
+  const samples = new Int16Array(480);
+  samples.fill(400);
+
+  assert.deepEqual(pcmVoiceOffsetsMs(new Uint8Array(samples.buffer)), {
+    durationMs: 20,
+    firstVoicedMs: 0,
+    lastVoicedMs: 20,
+  });
+});
+
+test("maps the server audio end position to the sent PCM packet", () => {
+  const packets = [];
+  let timelineEndMs = 0;
+  timelineEndMs = recordInputPcmPacket(packets, timelineEndMs, 100, 1000);
+  timelineEndMs = recordInputPcmPacket(packets, timelineEndMs, 100, 1100);
+  timelineEndMs = recordInputPcmPacket(packets, timelineEndMs, 100, 1200);
+
+  assert.equal(timelineEndMs, 300);
+  assert.equal(inputPcmSentAtMs(packets, 200), 1100);
+  assert.equal(inputPcmSentAtMs(packets, 200.1), 1200);
+  assert.equal(inputPcmSentAtMs(packets, 400), null);
 });
 
 test("fits latency bars to their container with proportional widths", () => {

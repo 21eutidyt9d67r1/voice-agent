@@ -120,7 +120,6 @@ class OtpService:
     ) -> None:
         self._clock = clock
         self._ttl = ttl_seconds
-        self._state_dir = state_dir
         self._test_access_code = test_access_code
         self._code_factory = code_factory or self._random_code
         self._redis = redis_client
@@ -133,13 +132,14 @@ class OtpService:
                 socket_connect_timeout=2,
                 socket_timeout=2,
             )
+        self._state_dir = None if self._redis is not None else state_dir
         self._by_caller: dict[str, _OtpRecord] = {}
         self._candidate_by_digest: dict[str, _CandidateOtpRecord] = {}
         self._active_digest_by_candidate: dict[str, str] = {}
         self._lock = threading.RLock()
-        if state_dir is not None:
-            state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            state_dir.chmod(0o700)
+        if self._state_dir is not None:
+            self._state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self._state_dir.chmod(0o700)
 
     def _random_code(self) -> str:
         while True:

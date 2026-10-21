@@ -1,7 +1,6 @@
 # Copyright (c) Microsoft. All rights reserved.
 """Public-project configuration for the standalone Voice Agent portal.
 
-Ported from voice_demo/common.py; see UPSTREAM.json and CHANGELOG.md.
 There are deliberately no internal backends, subscription discovery, or tokens
 in browser configuration. An Azure Foundry project is required; credentials
 are acquired lazily when the portal calls that project.
@@ -21,6 +20,20 @@ from azure.identity import AzureCliCredential, DefaultAzureCredential
 TOKEN_SCOPE = "https://ai.azure.com/.default"
 FOUNDRY_FEATURES = "VoiceAgents=V1Preview"
 INPUT_TRANSCRIPTION_MODEL = "azure-speech"
+TRANSCRIPTION_MODELS = [
+    "azure-speech",
+    "mai-transcribe",
+    "mai-transcribe-2",
+    "mai-transcribe-2-streaming",
+    "gpt-live-transcribe",
+    "gpt-realtime-whisper",
+    "gpt-transcribe",
+    "gpt-4o-transcribe",
+    "gpt-4o-mini-transcribe",
+    "gpt-4o-transcribe-diarize",
+    "whisper-1",
+]
+CASCADED_TRANSCRIPTION_MODELS = TRANSCRIPTION_MODELS[:4]
 REALTIME_MODELS = ["gpt-realtime", "gpt-realtime-mini", "gpt-realtime-1.5"]
 CASCADED_MODELS = ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"]
 MODELS = REALTIME_MODELS + CASCADED_MODELS

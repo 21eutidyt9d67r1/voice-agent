@@ -59,6 +59,75 @@ test("stops a microphone stream that arrives after disposal", async () => {
   }
 });
 
+for (const clientReferenceEc of [false, true]) {
+  test(`keeps greeting chunks sequential when microphone startup finishes (client reference: ${clientReferenceEc})`, async () => {
+    const originalNavigator = globalThis.navigator;
+    const originalAudioWorkletNode = globalThis.AudioWorkletNode;
+    const starts = [];
+    let resolveMedia;
+    const stream = { getTracks: () => [] };
+    const node = { connect: () => {}, disconnect: () => {} };
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: {
+        mediaDevices: {
+          getUserMedia: () => new Promise((resolve) => { resolveMedia = resolve; }),
+        },
+      },
+    });
+    globalThis.AudioWorkletNode = class {
+      constructor() { this.port = { onmessage: null, postMessage: () => {} }; }
+      disconnect() {}
+    };
+    const handler = new AudioHandler(undefined, { clientReferenceEc });
+    handler.context = {
+      currentTime: 10,
+      destination: {},
+      createGain: () => node,
+      createMediaStreamSource: () => node,
+      createBuffer: (_channels, length, sampleRate) => ({
+        duration: length / sampleRate,
+        getChannelData: () => new Float32Array(length),
+      }),
+      createBufferSource: () => ({
+        connect: () => {},
+        disconnect: () => {},
+        start: (at) => starts.push(at),
+        stop: () => {},
+        onended: null,
+      }),
+      close: () => {},
+    };
+    handler.initialize = async () => handler.ensurePlaybackBus();
+
+    try {
+      const starting = handler.startRecording(() => {});
+      await Promise.resolve();
+      handler.startStreamingPlayback();
+      const oneSecond = new Uint8Array(24000 * 2);
+      handler.playChunk(oneSecond);
+      handler.playChunk(oneSecond);
+
+      handler.context.currentTime = 10.25;
+      resolveMedia(stream);
+      await starting;
+      handler.playChunk(oneSecond);
+
+      assert.deepEqual(starts, [10, 11, 12]);
+      assert.equal(handler.nextPlayTime, 13);
+      assert.equal(handler.stream, stream);
+      assert.equal(handler.isPlaying, true);
+    } finally {
+      handler.dispose();
+      Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: originalNavigator,
+      });
+      globalThis.AudioWorkletNode = originalAudioWorkletNode;
+    }
+  });
+}
+
 test("routes microphone and rendered playback into a stereo capture worklet", async () => {
   const originalNavigator = globalThis.navigator;
   const originalAudioWorkletNode = globalThis.AudioWorkletNode;
@@ -336,4 +405,38 @@ test("records the scheduled end of voiced playback for the next perceived-latenc
   const speechEnd = handler.getLastScheduledSpeechEndAtMs();
   assert.ok(speechEnd >= before + 80);
   assert.ok(speechEnd <= performance.now() + 80);
+});
+
+test("cancelling one response preserves other scheduled sources and reclaims the cancelled tail", () => {
+  const stopped = [];
+  const handler = new AudioHandler();
+  handler.context = {
+    currentTime: 10,
+    destination: {},
+    createBuffer: (_channels, length, sampleRate) => ({
+      duration: length / sampleRate,
+      getChannelData: () => new Float32Array(length),
+    }),
+    createBufferSource: () => {
+      const source = {
+        connect() {},
+        disconnect() {},
+        start() {},
+        stop() { stopped.push(source.responseId); },
+      };
+      return source;
+    },
+  };
+  handler.startStreamingPlayback();
+  handler.playChunk(new Uint8Array(48000), 0, 1000, "kept");
+  handler.playChunk(new Uint8Array(48000), 0, 1000, "cancelled");
+  assert.equal(handler.nextPlayTime, 12);
+  handler.stopResponsePlayback("cancelled");
+  assert.deepEqual(stopped, ["cancelled"]);
+  assert.equal(handler.playbackQueue.length, 1);
+  assert.equal(handler.playbackQueue[0].responseId, "kept");
+  assert.equal(handler.nextPlayTime, 11);
+  assert.equal(handler.isPlaying, true);
+  handler.playChunk(new Uint8Array(48000), 0, 1000, "next");
+  assert.equal(handler.nextPlayTime, 12);
 });

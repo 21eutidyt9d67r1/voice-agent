@@ -372,6 +372,7 @@ function LatencyDialog({ metrics, allMessages, currentMessageId, onClose }) {
   const phases = metrics.atomicPhases || [];
   const ticks = latencyRulerTicks(metrics.endToEndMs);
   const origin = {
+    user_pcm_sent: "final user PCM packet sent",
     user_last_voiced: "last voiced microphone PCM",
     server_vad: "server speech_stopped (proxy)",
     text_input: "text input sent",
@@ -679,7 +680,7 @@ function DigitComparison({ comparison }) {
   );
 }
 
-export function MessageBubble({ message, allMessages = [], onApproval }) {
+export function MessageBubble({ message, allMessages = [], onApproval, debugMode = false }) {
   const { type, content, handoff, mcpApproval, mcpCall, functionCall, metrics } = message;
 
   if (type === "handoff" && handoff) {
@@ -691,8 +692,8 @@ export function MessageBubble({ message, allMessages = [], onApproval }) {
             <div><strong>Route:</strong> <code>{handoff.fromNodeId}</code> &rarr; <code>{handoff.toNodeId}</code></div>
             <div><strong>Edge:</strong> {handoff.edgeId}</div>
             <div><strong>Status:</strong> <span className={"mcp-status " + handoff.status}>{handoff.status}</span></div>
-            {handoff.durationMs != null ? <div><strong>Duration:</strong> {formatMetricMs(handoff.durationMs)}</div> : null}
-            {handoff.prepareDurationMs != null ? <div><strong>Prepare:</strong> {formatMetricMs(handoff.prepareDurationMs)}</div> : null}
+            {debugMode && handoff.durationMs != null ? <div><strong>Duration:</strong> {formatMetricMs(handoff.durationMs)}</div> : null}
+            {debugMode && handoff.prepareDurationMs != null ? <div><strong>Prepare:</strong> {formatMetricMs(handoff.prepareDurationMs)}</div> : null}
             {handoff.reason ? <div><strong>Abort reason:</strong> {handoff.reason}</div> : null}
             {handoff.error ? <div><strong>Error:</strong> <code className="wrap err">{JSON.stringify(handoff.error)}</code></div> : null}
           </div>
@@ -737,7 +738,7 @@ export function MessageBubble({ message, allMessages = [], onApproval }) {
             <div><strong>Tool:</strong> {mcpCall.name || "\u2014"}</div>
             {mcpCall.arguments ? <div><strong>Arguments:</strong> <code>{mcpCall.arguments}</code></div> : null}
             <div><strong>Status:</strong> <span className={"mcp-status " + status}>{STATUS_TEXT[status] || status}</span></div>
-            {mcpCall.durationMs != null ? (
+            {debugMode && mcpCall.durationMs != null ? (
               <div className="mcp-duration"><strong>Execution time:</strong> {formatMetricMs(mcpCall.durationMs)}</div>
             ) : null}
             {mcpCall.output ? <div><strong>Output:</strong> <code className="wrap">{mcpCall.output}</code></div> : null}
@@ -762,7 +763,7 @@ export function MessageBubble({ message, allMessages = [], onApproval }) {
             <div><strong>Function:</strong> {functionCall.name || "\u2014"}</div>
             {functionCall.arguments ? <div><strong>Arguments:</strong> <code className="wrap">{functionCall.arguments}</code></div> : null}
             <div><strong>Status:</strong> <span className={"mcp-status " + status}>{STATUS_TEXT[status] || status}</span></div>
-            {functionCall.durationMs != null ? (
+            {debugMode && functionCall.durationMs != null ? (
               <div className="mcp-duration"><strong>Execution time:</strong> {formatMetricMs(functionCall.durationMs)}</div>
             ) : null}
             <DigitComparison comparison={comparison} />
@@ -787,7 +788,7 @@ export function MessageBubble({ message, allMessages = [], onApproval }) {
             <div className="meta"><span>{LABELS.assistant}</span></div>
             <div className="text">{content}</div>
           </div>
-          {metrics ? (
+          {debugMode && metrics ? (
             <TurnMetrics metrics={metrics} allMessages={allMessages} currentMessageId={message.id} />
           ) : null}
         </div>
@@ -803,7 +804,7 @@ export function MessageBubble({ message, allMessages = [], onApproval }) {
             <div className="meta"><span>{LABELS.user}</span></div>
             <div className="text">{content}</div>
           </div>
-          {metrics ? <UserMetrics metrics={metrics} /> : null}
+          {debugMode && metrics ? <UserMetrics metrics={metrics} /> : null}
         </div>
       </div>
     );
