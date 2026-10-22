@@ -1,0 +1,68 @@
+name: Cost calculator Pages
+
+on:
+  pull_request:
+    paths:
+      - "tools/cost_calculator/**"
+      - ".github/workflows/cost-calculator-pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tools/cost_calculator/**"
+      - ".github/workflows/cost-calculator-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Check calculator
+        working-directory: tools/cost_calculator
+        shell: pwsh
+        run: |
+          node --test calculator.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check app.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --check server.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Stage browser assets only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $site = Join-Path $env:RUNNER_TEMP "cost-calculator-site"
+          New-Item -ItemType Directory -Path $site | Out-Null
+          foreach ($file in @("index.html", "styles.css", "app.mjs", "calculator.mjs", "prices.json")) {
+            Copy-Item -LiteralPath (Join-Path (Join-Path "tools" "cost_calculator") $file) -Destination $site
+          }
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/cost-calculator-site
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
