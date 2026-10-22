@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Agent Cost Lab</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.mjs"></script>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">VOICE AGENT / ECONOMICS</span><h1>Cost lab<span>.</span></h1>
+      <p>Compare voice pipelines. See what each turn really costs.</p></div>
+    <div class="region">SOUTH INDIA <span>USD / pay-as-you-go</span><small id="snapshot-date">Loading price snapshot...</small><small>HD voice &amp; missing Voice Live meters: Central India references</small></div>
+  </header>
+  <main>
+    <aside>
+      <form id="assumptions">
+        <section>
+          <h2><span>01</span> Build your pipeline</h2>
+          <label>Hosting<select id="hosting"><option value="managed">Managed Voice Agent</option><option value="byom">Bring your own model (BYOM)</option></select></label>
+          <label>Pipeline<select id="pipeline"><option value="native">Native speech-to-speech</option><option value="hybrid">Realtime text response + Azure HD</option><option value="cascade">Azure STT + text LLM + Azure HD</option><option value="live">GPT Live + reasoning backend</option></select></label>
+          <label>Model<select id="model"></select></label>
+          <p class="hint" id="model-note"></p>
+        </section>
+        <section>
+          <h2><span>02</span> Conversation assumptions</h2>
+          <div class="fields">
+            <label>Call duration (sec)<input name="duration" type="number" min="0.01" step="any" required></label>
+            <label>User / agent turn pairs<input name="turns" type="number" min="1" step="1" required></label>
+            <label>Human speech (sec)<input name="humanSeconds" type="number" min="0" step="any" required></label>
+            <label>Agent speech (sec)<input name="agentSeconds" type="number" min="0" step="any" required></label>
+            <label>Input audio tokens/sec<input name="inputAudioRate" type="number" min="0" step="any" required></label>
+            <label>Output audio tokens/sec<input name="outputAudioRate" type="number" min="0" step="any" required></label>
+            <label>User text tokens / call<input name="userText" type="number" min="0" step="any" required></label>
+            <label>Agent text tokens / call<input name="agentText" type="number" min="0" step="any" required></label>
+            <label>Native output text / call<input name="nativeText" type="number" min="0" step="any" required></label>
+            <label>Reasoning tokens / call<input name="reasoning" type="number" min="0" step="any" required></label>
+            <label>System prompt tokens<input name="prompt" type="number" min="0" step="any" required></label>
+            <label>Context cache hit (%)<input name="cachePercent" type="number" min="0" max="100" step="any" required></label>
+          </div>
+          <p class="hint">Defaults: 900 input + 900 output audio tokens. Text totals are independent estimates, not derived from audio. The 150-token user transcript is illustrative.</p>
+        </section>
+        <section>
+          <h2><span>03</span> Call volume</h2>
+          <div class="fields">
+            <label>Call volume<input name="calls" type="number" min="0" step="1" required></label>
+          </div>
+          <button type="button" id="reset" class="secondary">Reset calculator</button>
+        </section>
+      </form>
+    </aside>
+    <div class="workspace">
+      <div id="error" role="alert" hidden></div>
+      <div id="results">
+        <section class="overview">
+          <div class="section-top"><div><span class="eyebrow">YOUR SELECTED SCENARIO</span><h2 id="scenario">Calculating...</h2></div><span id="estimate-badge" class="badge">Estimate</span></div>
+          <div class="cards">
+            <article><span>List price / call</span><strong id="list-call">--</strong><small>Includes replayed context</small></article>
+            <article class="accent"><span>List price / minute</span><strong id="list-minute">--</strong><small>Based on full call duration</small></article>
+            <article><span>List price at your volume</span><strong id="volume-list">--</strong><small id="volume-note"></small></article>
+          </div>
+          <p id="summary" class="hint" aria-live="polite"></p>
+        </section>
+        <section>
+          <div class="section-top"><div><span class="eyebrow">THE LONG-PROMPT TAX</span><h2>System prompt sensitivity</h2></div>
+            <label class="inline">Show<select id="metric"><option value="list">List price / call</option><option value="listPerMinute">List price / minute</option></select></label>
+          </div>
+          <div id="prompt-chart" class="chart" aria-label="Prompt size cost comparison"></div>
+          <p class="hint">Same conversation, different prompt sizes. All values use list prices and the selected per-call or per-minute view.</p>
+        </section>
+        <section>
+          <div class="section-top"><div><span class="eyebrow">SIDE BY SIDE</span><h2>Pipeline comparison</h2></div><button id="export" type="button" class="secondary">Export CSV</button></div>
+          <p class="hint">Uses your assumptions and each model's own rates. Without a published managed tier, rows are explicitly labeled AOAI Global model-price + BYO speech references, not managed tariffs. Edits to the selected model apply to its rows. Missing prices never become zero.</p>
+          <div class="table-wrap"><table id="comparison"><thead></thead><tbody></tbody></table></div>
+        </section>
+        <section>
+          <span class="eyebrow">FOLLOW THE TOKENS</span><h2>Selected call breakdown</h2>
+          <div class="table-wrap"><table id="breakdown"><thead><tr><th>Component</th><th>Quantity</th><th>List rate*</th><th>List / call</th></tr></thead><tbody></tbody></table></div>
+          <p class="hint">*USD per million tokens, except GPT Live in USD/minute.</p>
+        </section>
+      </div>
+      <section>
+        <details open>
+          <summary>Price book &amp; editable deployment rates</summary>
+          <p id="price-note" class="hint"></p>
+          <div id="rates" class="fields rate-fields"></div>
+          <p class="hint">Blank = unknown, never free. Edits are user-supplied USD rates for this model and hosting mode, kept only in this page's memory. Clearing a verified rate marks it unknown. No Azure API is called at runtime.</p>
+          <details><summary>Retail meter provenance</summary><ul id="evidence"></ul></details>
+        </details>
+      </section>
+      <section class="method">
+        <h2>Read the estimate, not an invoice</h2>
+        <p>Each call starts with an uncached prompt. On later turns the prompt and prior conversation are reused at your cache-hit percentage. With equally sized turns, prior caller/agent tokens are each replayed (turns - 1) / 2 times. Cache misses use full input rates.</p>
+        <p>Native mode reuses audio history; text-response mode reuses caller audio and agent text; cascade and reasoning backends reuse text. Only newly generated speech is synthesized. Reasoning tokens are charged as text output, not retained as visible conversation history.</p>
+        <p>100% caching is an idealized assumption, not guaranteed prefix-cache eligibility. The supplied 20 input audio tokens/sec is preserved even though the public guide typically estimates ~10 for OpenAI input audio. Actual tokens, silence billing, tools, storage, telephony, hosting capacity, tax, and network charges can change the result and are excluded.</p>
+        <p>Model selection is for economic modeling, not a guarantee of South India deployment availability or supported BYOM audio connections. South India Global is the reference for BYOM models and GPT Live. No South India Voice Live managed-tier or BYO speech meters were found, so those use approved Central India references. Azure HD speech output also deliberately uses Central India rates. GPT-6 is explicitly GPT-6 Sol, short-context Standard pricing. GPT Live voice uses the South India Global rate ($3/hour = $0.05/minute); backend model usage is additional and no Azure HD charge is added. GPT Live's delegation frequency and backend context differ in practice; this estimate uses the same turn-based backend assumptions and a session-minute rate.</p>
+        <p>If a model has no verified managed tier, its economic reference combines AOAI Global model rates with BYO speech rates and is labeled accordingly. It is not a managed Voice Live price or support claim.</p>
+        <p><a href="https://azure.microsoft.com/en-us/pricing/details/speech/" target="_blank" rel="noreferrer">Azure Speech pricing</a> / <a href="https://azure.microsoft.com/en-us/pricing/details/azure-openai/" target="_blank" rel="noreferrer">Azure OpenAI pricing</a> / <a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live" target="_blank" rel="noreferrer">Model tiers &amp; metering</a> / <a href="https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/voice-agent-pricing" target="_blank" rel="noreferrer">Voice Agent billing</a></p>
+      </section>
+    </div>
+  </main>
+  <footer>VOICE AGENT COST LAB <span>Local calculations. Explicit assumptions. No credentials required.</span></footer>
+</body>
+</html>

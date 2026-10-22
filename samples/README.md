@@ -18,6 +18,7 @@ independent shared MCP reference implementation, start with the
 
 | Sample | What it demonstrates |
 | --- | --- |
+| [Voice Agent Cost Lab](../tools/cost_calculator/README.md) | Standalone browser list-price calculator in `tools`: South India model prices, labeled Central India HD/Voice Live references, managed/BYOM model selection, prompt sensitivity, and CSV export. No Azure credentials required. |
 | [Add voice to an existing customer agent](existing_agent_voice_design/README.md) | Design guide: use a Hosted Agent as the Foundry Voice Agent conversation engine to connect managed voice to an existing customer agent or API endpoint. Includes a high-level architecture diagram; not a runnable sample. |
 | [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local functions before and after migration. Includes dynamic session context and mid-session instruction-update examples. |
 | [Vehicle voice agent with local tools](vehicle_local_tools/README.md) | Web cockpit with cloud voice interaction and locally executed simulated climate, media, and navigation functions. Includes an offline dashboard, local policy enforcement, and a tool execution log. |
