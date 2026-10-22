@@ -39,7 +39,7 @@
             <label>System prompt tokens<input name="prompt" type="number" min="0" step="any" required></label>
             <label>Context cache hit (%)<input name="cachePercent" type="number" min="0" max="100" step="any" required></label>
           </div>
-          <p class="hint">Defaults: 900 input + 900 output audio tokens. Text totals are independent estimates, not derived from audio. The 150-token user transcript is illustrative.</p>
+          <p class="hint">Defaults: 10 input and 20 output audio tokens/sec, giving 450 input + 900 output audio tokens. Text totals are independent estimates, not derived from audio. The 150-token user transcript is illustrative.</p>
         </section>
         <section>
           <h2><span>03</span> Call volume</h2>
@@ -70,9 +70,9 @@
           <p class="hint">Same conversation, different prompt sizes. All values use list prices and the selected per-call or per-minute view.</p>
         </section>
         <section>
-          <div class="section-top"><div><span class="eyebrow">SIDE BY SIDE</span><h2>Pipeline comparison</h2></div><button id="export" type="button" class="secondary">Export CSV</button></div>
-          <p class="hint">Uses your assumptions and each model's own rates. Without a published managed tier, rows are explicitly labeled AOAI Global model-price + BYO speech references, not managed tariffs. Edits to the selected model apply to its rows. Missing prices never become zero.</p>
-          <div class="table-wrap"><table id="comparison"><thead></thead><tbody></tbody></table></div>
+          <div class="section-top"><div><span class="eyebrow">SIDE BY SIDE</span><h2>Pipeline comparison (USD / minute)</h2></div><button id="export" type="button" class="secondary">Export CSV</button></div>
+          <p class="hint">All costs are USD per minute, based on full call duration, your assumptions, and each model's own rates. Without a published managed tier, rows are explicitly labeled AOAI Global model-price + BYO speech references, not managed tariffs. Edits to the selected model apply to its rows. Missing prices never become zero.</p>
+          <div class="table-wrap"><table id="comparison" aria-label="Pipeline list-price comparison in USD per minute"><thead></thead><tbody></tbody></table></div>
         </section>
         <section>
           <span class="eyebrow">FOLLOW THE TOKENS</span><h2>Selected call breakdown</h2>

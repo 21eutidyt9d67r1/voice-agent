@@ -167,7 +167,6 @@ function scenarios() {
 }
 
 function renderComparison(a) {
-  const metric = $("metric").value;
   const heading = element("tr");
   heading.append(element("th", "Pipeline / model"), ...PROMPTS.map(p => element("th", `${p.toLocaleString("en-US")} tokens`)));
   $("comparison").tHead.replaceChildren(heading);
@@ -182,7 +181,7 @@ function renderComparison(a) {
     row.append(title);
     for (const prompt of PROMPTS) {
       const result = calculate({ ...a, prompt }, pipeline, rates);
-      const cell = element("td", money(result[metric]), result[metric] === null ? "missing" : "");
+      const cell = element("td", money(result.listPerMinute), result.listPerMinute === null ? "missing" : "");
       cell.title = result.missing.length ? `Missing list rates: ${result.missing.map(k => labels[k]).join(", ")}` :
         `List price: ${money(result.list)}/call; ${money(result.listPerMinute)}/minute`;
       row.append(cell);

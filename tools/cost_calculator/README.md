@@ -31,6 +31,9 @@ component reference regions, processing scopes, and meter IDs.
 The CSV also distinguishes managed-tier pricing from AOAI Global economic
 references when a model has no published managed tier.
 Changes are in memory only and reset on reload.
+The pipeline comparison always shows **USD per minute**, using the full call
+duration. The per-call/per-minute selector affects only the prompt-sensitivity
+chart. CSV export retains both per-call and per-minute amounts.
 
 ## Deploy
 
@@ -125,13 +128,18 @@ Global, Data Zone, Batch, or fine-tuning meters.
 
 ## Assumptions and formulas
 
-Defaults preserve the supplied **90-second call**, **4 user + 4 agent
-turns**, **45 seconds of speech each**, **20 audio tokens/sec** in both
-directions, **100% reused-context caching**, and **150 agent text tokens**
+Defaults use the supplied **90-second call**, **4 user + 4 agent
+turns**, **45 seconds of speech each**, **100% reused-context caching**,
+and **150 agent text tokens**
 for text-response pipelines. User transcript length was not supplied:
 the calculator explicitly assumes an editable **150 user text tokens**.
 Native output text and reasoning tokens default to zero and can be changed.
 These defaults are modeling inputs, not measured usage.
+Audio defaults follow
+[Voice Live's Azure OpenAI estimates](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live#token-usage-and-cost-estimation):
+**10 input audio tokens/sec** and **20 output audio tokens/sec**, giving
+**450 input** and **900 output** audio tokens per default call. Both rates
+remain editable for other model families or measured usage.
 
 Each call starts cold; the system prompt costs `P * input_rate` on its
 first turn. Its `P * (turns - 1)` reused tokens are charged at the selected
@@ -156,8 +164,7 @@ all token prices or context-accounting details and may use different rates.
 This calculator recomputes costs transparently rather than fitting those totals.
 Actual caching eligibility, audio token rates, silence billing, tool calls,
 telephony, storage, network, tax, capacity charges, and model quality are not
-captured. In particular, the documented OpenAI input estimate is typically
-~10 audio tokens/sec; 20 is retained here because it was explicitly requested.
+captured.
 
 ## Checks
 

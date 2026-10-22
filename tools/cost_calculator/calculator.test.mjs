@@ -51,7 +51,7 @@ test("South India GPT-4.1 and realtime prices do not reuse managed tier rates", 
   close(book("gpt-realtime-2.1-mini", "byom").textCached, 0.06);
   close(book("gpt-realtime", "byom").audioOutput, 64);
   const result = calculate({ ...DEFAULTS, prompt: 0 }, "cascade", rates);
-  close(result.list, (150 * 2 + 450 * 0.5 + 150 * 8 + 900 * (12.5 + 23)) / 1e6);
+  close(result.list, (150 * 2 + 450 * 0.5 + 150 * 8 + 450 * 12.5 + 900 * 23) / 1e6);
 });
 
 test("unverified managed tiers use explicit Global model references, not invented tier rates", () => {
@@ -79,10 +79,24 @@ test("all selectable models have priced scenarios across both hosting modes", ()
 
 test("default native call counts fresh audio and cached history without speech duplication", () => {
   const result = calculate({ ...DEFAULTS, prompt: 0 }, "native", book("gpt-realtime-2.1"));
-  assert.equal(result.inputAudio, 900);
+  assert.equal(DEFAULTS.inputAudioRate, 10);
+  assert.equal(DEFAULTS.outputAudioRate, 20);
+  assert.equal(result.inputAudio, 450);
   assert.equal(result.outputAudio, 900);
-  close(result.list, (900 * 32 + 900 * 64 + 2700 * 0.4) / 1e6);
+  close(result.list, (450 * 32 + 900 * 64 + 2025 * 0.4) / 1e6);
   assert.ok(result.rows.every(r => !r.label.includes("Azure")));
+});
+
+test("input audio rate overrides do not change output audio usage", () => {
+  const rates = book("gpt-realtime-2.1");
+  const original = calculate({ ...DEFAULTS, prompt: 0, inputAudioRate: 20 }, "native", rates);
+  const updated = calculate({ ...DEFAULTS, prompt: 0 }, "native", rates);
+  assert.equal(original.inputAudio, 900);
+  assert.equal(updated.inputAudio, 450);
+  assert.equal(original.outputAudio, 900);
+  assert.equal(updated.outputAudio, 900);
+  close(original.list, (900 * 32 + 900 * 64 + 2700 * 0.4) / 1e6);
+  close(original.list - updated.list, (450 * 32 + 675 * 0.4) / 1e6);
 });
 
 test("system prompt is full price once, reused across the remaining turns", () => {
@@ -91,7 +105,7 @@ test("system prompt is full price once, reused across the remaining turns", () =
   const full = calculate(DEFAULTS, "native", rates);
   close(full.list - base.list, 5000 * (4 + 3 * 0.4) / 1e6);
   const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, "native", rates);
-  close(noCache.list, (20000 * 4 + 3600 * 32 + 900 * 64) / 1e6);
+  close(noCache.list, (20000 * 4 + 2475 * 32 + 900 * 64) / 1e6);
   const halfCache = calculate({ ...DEFAULTS, cachePercent: 50 }, "native", rates);
   close(halfCache.list, (noCache.list + full.list) / 2);
 });
@@ -99,12 +113,12 @@ test("system prompt is full price once, reused across the remaining turns", () =
 test("single turn does not charge replayed context", () => {
   const result = calculate({ ...DEFAULTS, turns: 1 }, "hybrid", book("gpt-realtime-2.1"));
   assert.ok(result.rows.every(r => !r.label.includes("/ cached")));
-  close(result.list, (5000 * 4 + 900 * 32 + 150 * 24 + 900 * 31) / 1e6);
+  close(result.list, (5000 * 4 + 450 * 32 + 150 * 24 + 900 * 31) / 1e6);
 });
 
 test("hybrid uses 150 text output tokens and HD list price, no native output audio charge", () => {
   const result = calculate({ ...DEFAULTS, prompt: 0 }, "hybrid", book("gpt-realtime-2.1"));
-  const llm = (900 * 32 + 1350 * 0.4 + 225 * 0.4 + 150 * 24) / 1e6;
+  const llm = (450 * 32 + 675 * 0.4 + 225 * 0.4 + 150 * 24) / 1e6;
   close(result.list, llm + 900 * 31 / 1e6);
   assert.ok(result.rows.every(r => r.key !== "audioOutput"));
 });
@@ -116,7 +130,7 @@ test("BYOM uses BYO speech meters, not managed tier prices", () => {
   close(rates.textOutput, 15);
   const result = calculate({ ...DEFAULTS, prompt: 0 }, "cascade", rates);
   const llm = (150 * 2.5 + 450 * 0.25 + 150 * 15) / 1e6;
-  close(result.list, llm + 900 * (12.5 + 23) / 1e6);
+  close(result.list, llm + (450 * 12.5 + 900 * 23) / 1e6);
   close(result.listPerMinute, result.list / 1.5);
 });
 
@@ -201,7 +215,7 @@ test("zero-priced input is explicit and unused missing rates do not block a tota
   const rates = { ...book("gpt-realtime"), textInput: null, textCached: null, audioOutput: 0 };
   const result = calculate({ ...DEFAULTS, prompt: 0 }, "native", rates);
   assert.deepEqual(result.missing, []);
-  close(result.list, (900 * 32 + 2700 * 0.4) / 1e6);
+  close(result.list, (450 * 32 + 2025 * 0.4) / 1e6);
 });
 
 test("all five prompt sizes grow monotonically for every priced model", () => {
