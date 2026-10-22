@@ -57,9 +57,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           $site = Join-Path $env:RUNNER_TEMP "cost-calculator-site"
           New-Item -ItemType Directory -Path $site | Out-Null
-          foreach ($file in @("index.html", "styles.css", "app.mjs", "calculator.mjs", "prices.json")) {
+          foreach ($file in @("index.html", "styles.css", "app.mjs", "calculator.mjs", "prices.json", "favicon.svg")) {
             Copy-Item -LiteralPath (Join-Path (Join-Path "tools" "cost_calculator") $file) -Destination $site
           }
+          $index = Join-Path $site "index.html"
+          $html = Get-Content -LiteralPath $index -Raw
+          $marker = '<span id="build-info">Local preview (not deployed)</span>'
+          if (-not $html.Contains($marker)) { throw "Missing deployment commit marker in index.html." }
+          $commitUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA"
+          $commitLink = '<a id="build-info" href="{0}" title="{1}" target="_blank" rel="noopener noreferrer">Commit {2}</a>' -f $commitUrl, $env:GITHUB_SHA, $env:GITHUB_SHA.Substring(0, 7)
+          $html.Replace($marker, $commitLink) | Set-Content -LiteralPath $index -Encoding utf8 -NoNewline
       - uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/cost-calculator-site

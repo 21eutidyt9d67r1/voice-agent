@@ -2,8 +2,8 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const allowed = new Set(["index.html", "styles.css", "app.mjs", "calculator.mjs", "prices.json"]);
-const mime = { html: "text/html", css: "text/css", mjs: "text/javascript", json: "application/json" };
+const allowed = new Set(["index.html", "styles.css", "app.mjs", "calculator.mjs", "prices.json", "favicon.svg"]);
+const mime = { html: "text/html", css: "text/css", mjs: "text/javascript", json: "application/json", svg: "image/svg+xml" };
 const port = Number(process.env.PORT || 8095);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("PORT must be an integer from 1 to 65535.");
 const server = createServer(async (req, res) => {

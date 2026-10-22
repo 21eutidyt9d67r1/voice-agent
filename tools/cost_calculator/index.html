@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Voice Agent Cost Lab</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.mjs"></script>
 </head>
@@ -93,13 +94,13 @@
         <h2>Read the estimate, not an invoice</h2>
         <p>Each call starts with an uncached prompt. On later turns the prompt and prior conversation are reused at your cache-hit percentage. With equally sized turns, prior caller/agent tokens are each replayed (turns - 1) / 2 times. Cache misses use full input rates.</p>
         <p>Native mode reuses audio history; text-response mode reuses caller audio and agent text; cascade and reasoning backends reuse text. Only newly generated speech is synthesized. Reasoning tokens are charged as text output, not retained as visible conversation history.</p>
-        <p>100% caching is an idealized assumption, not guaranteed prefix-cache eligibility. The supplied 20 input audio tokens/sec is preserved even though the public guide typically estimates ~10 for OpenAI input audio. Actual tokens, silence billing, tools, storage, telephony, hosting capacity, tax, and network charges can change the result and are excluded.</p>
+        <p>100% caching is an idealized assumption, not guaranteed prefix-cache eligibility. Audio defaults use the public guide's estimates of 10 input and 20 output audio tokens/sec for Azure OpenAI models. Actual tokens, silence billing, tools, storage, telephony, hosting capacity, tax, and network charges can change the result and are excluded.</p>
         <p>Model selection is for economic modeling, not a guarantee of South India deployment availability or supported BYOM audio connections. South India Global is the reference for BYOM models and GPT Live. No South India Voice Live managed-tier or BYO speech meters were found, so those use approved Central India references. Azure HD speech output also deliberately uses Central India rates. GPT-6 is explicitly GPT-6 Sol, short-context Standard pricing. GPT Live voice uses the South India Global rate ($3/hour = $0.05/minute); backend model usage is additional and no Azure HD charge is added. GPT Live's delegation frequency and backend context differ in practice; this estimate uses the same turn-based backend assumptions and a session-minute rate.</p>
         <p>If a model has no verified managed tier, its economic reference combines AOAI Global model rates with BYO speech rates and is labeled accordingly. It is not a managed Voice Live price or support claim.</p>
         <p><a href="https://azure.microsoft.com/en-us/pricing/details/speech/" target="_blank" rel="noreferrer">Azure Speech pricing</a> / <a href="https://azure.microsoft.com/en-us/pricing/details/azure-openai/" target="_blank" rel="noreferrer">Azure OpenAI pricing</a> / <a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live" target="_blank" rel="noreferrer">Model tiers &amp; metering</a> / <a href="https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/voice-agent-pricing" target="_blank" rel="noreferrer">Voice Agent billing</a></p>
       </section>
     </div>
   </main>
-  <footer>VOICE AGENT COST LAB <span>Local calculations. Explicit assumptions. No credentials required.</span></footer>
+  <footer>VOICE AGENT COST LAB <span>Local calculations. Explicit assumptions. No credentials required.</span><span id="build-info">Local preview (not deployed)</span></footer>
 </body>
 </html>

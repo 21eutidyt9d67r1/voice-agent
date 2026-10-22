@@ -47,10 +47,14 @@ Actions tab. Pull requests and other branches cannot deploy.
 
 The repository must have **Settings > Pages > Source > GitHub Actions**
 enabled. The deployment publishes exactly `index.html`, `styles.css`,
-`app.mjs`, `calculator.mjs`, and `prices.json` at the site's root, excluding
+`app.mjs`, `calculator.mjs`, `prices.json`, and the voice-wave `favicon.svg`
+at the site's root, excluding
 the local server, tests, documentation, and all other repository files.
 No dependency installation or build command is needed. All asset URLs are
 relative, so the page works under a repository subpath.
+During deployment, the workflow stamps the footer with the short commit hash
+and a link to that exact source commit. Local previews show
+**Local preview (not deployed)** instead.
 
 For this repository, the published address is
 **https://microsoft.github.io/voice-agent/** after the first successful
@@ -61,7 +65,7 @@ is required. Set the app location to this tool's directory, leave the API
 location empty, and deploy the existing assets without a build. Configure
 authentication and route access rules if the page must not be public.
 
-Deploy only the five browser assets above; no server, credentials, or live
+Deploy only the six browser assets above; no server, credentials, or live
 Azure connection is needed. Pricing updates require updating the snapshot
 and redeploying.
 
