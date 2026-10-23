@@ -2,7 +2,7 @@ export const DEFAULTS = Object.freeze({
   duration: 90, turns: 4, humanSeconds: 45, agentSeconds: 45,
   inputAudioRate: 10, outputAudioRate: 20,
   userText: 150, agentText: 150, nativeText: 0, reasoning: 0,
-  cachePercent: 100, prompt: 5000, calls: 10000,
+  cachePercent: 100, silencePercent: 20, prompt: 5000, calls: 10000,
 });
 
 export const PROMPTS = [0, 1000, 5000, 10000, 20000];
@@ -39,6 +39,7 @@ export function validateAssumptions(a) {
     throw new Error("Human + agent speaking time cannot exceed call duration in this turn-based estimate.");
   }
   if (a.cachePercent > 100) throw new Error("Cache percentage must be between 0 and 100.");
+  if (a.silencePercent > 100) throw new Error("Silence percentage must be between 0 and 100.");
 }
 
 export function meterRate(snapshot, name, unit = "tokens") {
@@ -134,8 +135,9 @@ export function calculate(a, pipeline, rates) {
   const missing = new Set();
   const reuse = (a.turns - 1) / 2;
   const hit = a.cachePercent / 100;
-  const inputAudio = a.humanSeconds * a.inputAudioRate;
-  const outputAudio = a.agentSeconds * a.outputAudioRate;
+  const speakingFraction = 1 - a.silencePercent / 100;
+  const inputAudio = a.humanSeconds * speakingFraction * a.inputAudioRate;
+  const outputAudio = a.agentSeconds * speakingFraction * a.outputAudioRate;
   function add(label, quantity, key, unit = "tokens") {
     if (!Number.isFinite(quantity)) throw new Error(`Token quantity is too large: ${label}`);
     if (quantity === 0) return;

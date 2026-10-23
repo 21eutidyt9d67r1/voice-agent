@@ -125,7 +125,7 @@ function renderOverview(a, model, pipeline, result, book) {
   badge.className = `badge${result.list === null ? "" : " good"}`;
   $("summary").textContent = result.missing.length ?
     `List estimate needs: ${result.missing.map(key => labels[key]).join(", ")}. Enter missing values in the price book below.` :
-    `${result.inputAudio.toLocaleString("en-US")} fresh caller audio tokens / ${result.outputAudio.toLocaleString("en-US")} generated speech tokens / ${a.turns} user + ${a.turns} agent turns.`;
+    `${result.inputAudio.toLocaleString("en-US")} fresh caller audio tokens / ${result.outputAudio.toLocaleString("en-US")} generated speech tokens / ${a.turns} user + ${a.turns} agent turns. Audio usage includes ${a.silencePercent}% silence reduction; text and session minutes are unchanged.`;
   $("model-note").textContent = pipeline === "live" ?
     "Backend model + GPT Live voice use Azure OpenAI South India Global references ($0.05/minute for voice). Availability must be confirmed." :
     book.usesGlobalReference ?
@@ -189,7 +189,7 @@ function renderComparison(a) {
         model: model.id, pipeline, hosting: effectiveHosting(pipeline), region: snapshot.region,
         pricing_basis: usesGlobalReference ? "aoai-global-model-plus-byo-speech-reference" :
           effectiveHosting(pipeline) === "managed" ? "voice-live-tier-reference" : "byom",
-        prompt_tokens: prompt, list_per_call: result.list,
+        prompt_tokens: prompt, silence_percent: a.silencePercent, list_per_call: result.list,
         list_per_minute: result.listPerMinute, missing_list_rates: result.missing.join("; "),
         price_snapshot: snapshot.retrievedAt,
         model_rate_region: modelMeter ? modelMeter.armRegionName || snapshot.region : "",
