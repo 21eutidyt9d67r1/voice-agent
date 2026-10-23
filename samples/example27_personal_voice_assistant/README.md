@@ -58,8 +58,8 @@ Fixed mock data (see the
 - Help-center articles match keywords such as password or MFA, VPN or
   GlobalProtect, expense report, PTO or time off, Wi-Fi, and Company Portal
   software.
-- New follow-up tickets are numbered from 1001. Mock emails are recorded as
-  sent; no email leaves the service.
+- New follow-up tickets get a random four-digit number. Mock emails report `sent`; no
+  email leaves the service and nothing is kept.
 
 ## Run in the portal
 
@@ -85,8 +85,8 @@ Playground because they act as the signed-in user.
   emailed. Say "no" instead and nothing is sent.
 - "I need someone in Legal to review a contract." Expect Legal as the team,
   questions for your name and callback number, and a read-back. After "yes",
-  expect one `mock_tool_call_zendesk_create_ticket` call and a request number
-  from 1001 up, with no promised response time.
+  expect one `mock_tool_call_zendesk_create_ticket` call and a four-digit request
+  number, with no promised response time.
 
 ## Boundaries
 

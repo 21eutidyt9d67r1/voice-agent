@@ -65,7 +65,8 @@ Fixed mock data (see the
   available.
 - Existing reservation **A1B2C3**, last name **Test** (Dana Test): Classic King,
   2 nights, arriving 14 days after the first lookup, so cancelling it is free.
-- New reservations get confirmation numbers `M00001`, `M00002`, and so on.
+- New reservations get a random confirmation number such as `M3K9QZ`. The mock
+  keeps nothing callers say, so only `A1B2C3` can be looked up or cancelled.
 
 ## Run in the portal
 

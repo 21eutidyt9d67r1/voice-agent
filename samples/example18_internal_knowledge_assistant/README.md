@@ -66,7 +66,7 @@ Fixed mock data (see the
   VPN, GlobalProtect, or authentication failed; sync failure; API 401 or token;
   install software or Company Portal; monitor flicker; expense report; PTO or
   time off; Wi-Fi.
-- New tickets are numbered from 1001.
+- New tickets get a random four-digit number; the mock does not keep them.
 
 ## Run in the portal
 

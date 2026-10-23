@@ -65,8 +65,8 @@ Fixed mock data (see the
 
 - The calendar owner is in Pacific Standard Time; meeting suggestions come back
   in UTC. About one half-hour start in five is busy.
-- New tickets are numbered from 1001, so the request number keeps counting up
-  across Playground users.
+- New tickets get a random four-digit number. The mock keeps nothing callers say, so a new
+  ticket cannot be looked up later.
 
 ## Run in the portal
 

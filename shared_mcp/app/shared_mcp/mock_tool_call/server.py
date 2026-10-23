@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .service import MockToolCallService
 
 
-MOCK_NOTE = " Mock data only: nothing real is booked, sent, or stored outside this demo service."
+MOCK_NOTE = " Mock data only: nothing real is booked or sent, and this service stores nothing the caller provides."
 
 
 class MockError(BaseModel):

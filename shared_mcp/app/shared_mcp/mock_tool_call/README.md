@@ -38,19 +38,19 @@ schema validation as MCP errors.
 | `mock_tool_call_create_event` | Work IQ `CreateEvent` | Returns `id`, times, attendees, and a fake Teams `joinUrl` for online meetings. |
 | `mock_tool_call_list_calendar_view` | Work IQ `ListCalendarView` | Events overlapping the range whose subject contains `subject`. |
 | `mock_tool_call_update_event` | Work IQ `UpdateEvent` | Moves or renames an event. |
-| `mock_tool_call_cancel_event` | Work IQ `CancelEvent` | Cancelled events disappear from listings and free their slot. |
+| `mock_tool_call_cancel_event` | Work IQ `CancelEvent` | Returns `cancelled`; nothing is stored, so the event still lists for the next caller. |
 | `mock_tool_call_get_user_presence` | Work IQ Teams `GetUserPresence` | Argument `userEmail`. |
-| `mock_tool_call_send_email_with_attachments` | Work IQ Mail `SendEmailWithAttachments` | Recorded as `sent`; no email leaves the service. |
+| `mock_tool_call_send_email_with_attachments` | Work IQ Mail `SendEmailWithAttachments` | Reports `sent`; no email leaves the service. |
 | `mock_tool_call_salesforce_search` | `salesforce_search` | Contacts by exact email or partial name. |
 | `mock_tool_call_salesforce_get_contact` | `salesforce_get_contact` | By Contact Id or email; `found`. |
 | `mock_tool_call_salesforce_create_lead` | `salesforce_create_lead` | Returns `lead_id` `00QMOCK…`. |
 | `mock_tool_call_zendesk_search` | `zendesk_search` | `type=articles` (default) searches the articles below; `type=tickets` searches tickets, a number reads one ticket. |
-| `mock_tool_call_zendesk_add_comment` | `zendesk_add_comment` | Existing ticket only; reopens a solved or pending ticket. |
-| `mock_tool_call_zendesk_create_ticket` | `zendesk_create_ticket` | New tickets are numbered from 1001. |
+| `mock_tool_call_zendesk_add_comment` | `zendesk_add_comment` | Tickets 1 to 3, or a four-digit number from `zendesk_create_ticket`; reports the ticket reopened. |
+| `mock_tool_call_zendesk_create_ticket` | `zendesk_create_ticket` | Returns a random four-digit ticket number; the ticket is not stored. |
 | `mock_tool_call_twilio_send_message` | `twilio_send_message` | Any valid E.164 number is `queued`; no text is delivered. |
 | `mock_tool_call_order_lookup` | ElevenLabs order lookup (custom tool) | By order number or account email. |
 | `mock_tool_call_hotel_check_availability` | ElevenLabs reservation tools (custom) | Rooms, availability, and total before taxes. |
-| `mock_tool_call_hotel_create_reservation` | | Returns a confirmation number `M00001`, `M00002`, … |
+| `mock_tool_call_hotel_create_reservation` | | Returns a random confirmation number such as `M3K9QZ`; the reservation is not stored. |
 | `mock_tool_call_hotel_get_reservation` | | By confirmation number and last name. |
 | `mock_tool_call_hotel_cancel_reservation` | | Reports a one-night `cancellation_fee` inside 48 hours of the 3 PM arrival. |
 | `mock_tool_call_quiz_record_result` | | Records a quiz score; returns `record_id` and `passed`. |
@@ -61,8 +61,10 @@ schema validation as MCP errors.
 ## Fixed test data
 
 All values are in [`fixtures.json`](fixtures.json) and match the Template try-it
-guide. Writes are shared by every Playground user and expire after 48 hours, so
-numbers that the service assigns (new tickets, events, leads) keep counting up.
+guide. The service is stateless: write tools validate their arguments and return
+a generated ID, but nothing a caller says is stored or shown to another caller.
+Reads return only these fixtures, so a booked slot stays free and a new ticket
+or reservation cannot be looked up later.
 
 ### CRM contacts
 

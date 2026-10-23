@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-from .store import StateStore
 
 
 logger = logging.getLogger("shared_mcp.mock_tool_call")
@@ -51,6 +50,9 @@ WINDOWS_TIME_ZONES = {
     "aus eastern standard time": "Australia/Sydney",
     "new zealand standard time": "Pacific/Auckland",
 }
+GENERATED_EVENT_ID = re.compile(r"^mock-evt-[0-9a-f]{8}$")
+# Ticket IDs that create_ticket hands out; anything in this range is treated as created earlier in the call.
+GENERATED_TICKET_IDS = range(1000, 10000)
 STOP_WORDS = {
     "the", "and", "for", "with", "how", "what", "why", "can", "does", "not", "my", "our",
     "you", "your", "is", "are", "was", "to", "of", "in", "on", "a", "an", "i", "it", "do",
@@ -59,18 +61,23 @@ STOP_WORDS = {
 
 
 class MockToolCallService:
-    """Deterministic fake business systems for the Voice Agent template catalog."""
+    """Fake business systems for the Voice Agent template catalog.
+
+    Stateless by design: write tools validate their arguments and return a generated ID, but
+    nothing a caller says is stored, so no caller can see another caller's data. Reads return
+    only the fixed fictional fixtures, computed per call.
+    """
 
     def __init__(
         self,
-        store: StateStore,
         fixtures: dict[str, Any] | None = None,
         *,
         clock: Callable[[], datetime] | None = None,
+        rng: random.Random | None = None,
     ) -> None:
-        self._store = store
         self._fixtures = fixtures if fixtures is not None else load_fixtures()
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._rng = rng or random.SystemRandom()
         self._user_zone_name = str(self._fixtures["calendar"]["user_time_zone"])
 
     # ------------------------------------------------------------------ helpers
@@ -152,16 +159,16 @@ class MockToolCallService:
 
     # ------------------------------------------------------------- calendar
 
-    def _seed_events(self) -> None:
+    def _events(self) -> list[dict[str, Any]]:
+        """The fixture seed events, placed relative to today on every call."""
+        events = []
         for seed in self._fixtures["calendar"]["seed_events"]:
-            if self._store.get("event", seed["id"]) is not None:
-                continue
             zone = self._zone(seed["time_zone"])
             today = self._today(zone)
             offset = (WEEKDAYS.index(seed["weekday"]) - today.weekday()) % 7 or 7
             hour, minute = (int(part) for part in seed["start"].split(":"))
             start = datetime.combine(today + timedelta(days=offset), time(hour, minute), zone)
-            self._store.put_if_absent("event", seed["id"], {
+            events.append({
                 "id": seed["id"],
                 "subject": seed["subject"],
                 "start_utc": start.astimezone(timezone.utc).isoformat(),
@@ -173,15 +180,10 @@ class MockToolCallService:
                 "body": "",
                 "cancelled": False,
             })
-
-    def _events(self) -> list[dict[str, Any]]:
-        self._seed_events()
-        events = []
-        for key in self._store.keys("event"):
-            event = self._store.get("event", key)
-            if event and not event.get("cancelled"):
-                events.append(event)
         return events
+
+    def _seed_event(self, event_id: str) -> dict[str, Any] | None:
+        return next((event for event in self._events() if event["id"] == event_id), None)
 
     def _event_view(self, event: dict[str, Any], zone_name: str | None = None) -> dict[str, Any]:
         name = zone_name or event["time_zone"]
@@ -329,9 +331,8 @@ class MockToolCallService:
         invalid = [address for address in attendee_emails if not EMAIL.fullmatch(address.strip())]
         if invalid:
             return self._fail(tool, "INVALID_ATTENDEE", f"Not a valid email address: {invalid[0]}")
-        event_id = f"mock-evt-{self._store.next_number('event', 1000)}"
         event = {
-            "id": event_id,
+            "id": f"mock-evt-{self._rng.getrandbits(32):08x}",
             "subject": subject.strip(),
             "start_utc": start.astimezone(timezone.utc).isoformat(),
             "end_utc": end.astimezone(timezone.utc).isoformat(),
@@ -342,7 +343,6 @@ class MockToolCallService:
             "body": body.strip(),
             "cancelled": False,
         }
-        self._store.put("event", event_id, event)
         return self._ok(tool, **self._event_view(event))
 
     def list_calendar_view(
@@ -385,12 +385,23 @@ class MockToolCallService:
         location: str,
     ) -> dict[str, Any]:
         tool = "update_event"
-        self._seed_events()
-        event = self._store.get("event", event_id.strip())
+        key = event_id.strip()
+        event = self._seed_event(key)
         if event is None:
-            return self._fail(tool, "EVENT_NOT_FOUND", f"No event with id {event_id}.")
-        if event.get("cancelled"):
-            return self._fail(tool, "EVENT_CANCELLED", f"Event {event_id} was cancelled.")
+            if not GENERATED_EVENT_ID.fullmatch(key):
+                return self._fail(tool, "EVENT_NOT_FOUND", f"No event with id {event_id}.")
+            # An event created earlier in this call; the mock kept nothing, so the new times must be given.
+            if not (start_date_time.strip() and end_date_time.strip()):
+                return self._fail(
+                    tool,
+                    "INVALID_ARGUMENT",
+                    "Give both startDateTime and endDateTime to move an event created earlier in this call.",
+                )
+            event = {
+                "id": key, "subject": "", "start_utc": "", "end_utc": "",
+                "time_zone": self._user_zone_name, "attendees": [], "is_online_meeting": False,
+                "location": "", "body": "", "cancelled": False,
+            }
         zone_name = time_zone.strip() or event["time_zone"]
         try:
             zone = self._zone(zone_name)
@@ -419,20 +430,15 @@ class MockToolCallService:
             event["subject"] = subject.strip()
         if location.strip():
             event["location"] = location.strip()
-        self._store.put("event", event["id"], event)
         return self._ok(tool, **self._event_view(event))
 
     def cancel_event(self, event_id: str, comment: str) -> dict[str, Any]:
         tool = "cancel_event"
-        self._seed_events()
-        event = self._store.get("event", event_id.strip())
-        if event is None:
+        key = event_id.strip()
+        event = self._seed_event(key)
+        if event is None and not GENERATED_EVENT_ID.fullmatch(key):
             return self._fail(tool, "EVENT_NOT_FOUND", f"No event with id {event_id}.")
-        if event.get("cancelled"):
-            return self._fail(tool, "EVENT_CANCELLED", f"Event {event_id} was already cancelled.")
-        event.update(cancelled=True, cancel_comment=comment.strip())
-        self._store.put("event", event["id"], event)
-        return self._ok(tool, eventId=event["id"], subject=event["subject"], cancelled=True)
+        return self._ok(tool, eventId=key, subject=event["subject"] if event else "", cancelled=True)
 
     # ------------------------------------------------------- presence, mail
 
@@ -462,11 +468,7 @@ class MockToolCallService:
         invalid = [address for address in [*recipients, *cc] if not EMAIL.fullmatch(address.strip())]
         if not recipients or invalid:
             return self._fail(tool, "INVALID_RECIPIENT", f"Not a valid email address: {(invalid or [''])[0]}")
-        message_id = f"mock-mail-{self._store.next_number('mail', 1000)}"
-        self._store.put("mail", message_id, {
-            "id": message_id, "to": recipients, "cc": cc, "subject": subject,
-            "content_type": content_type, "body_length": len(body),
-        })
+        message_id = f"mock-mail-{self._rng.getrandbits(32):08x}"
         return self._ok(tool, messageId=message_id, status="sent", to=recipients, subject=subject)
 
     # ------------------------------------------------------------ salesforce
@@ -499,16 +501,13 @@ class MockToolCallService:
         email = fields.get("email", "").strip()
         if email and not EMAIL.fullmatch(email):
             return self._fail(tool, "INVALID_EMAIL", f"Not a valid email address: {email}", source="salesforce", lead_id=None)
-        lead_id = f"00QMOCK{self._store.next_number('lead', 0):09d}"
-        self._store.put("lead", lead_id, {"id": lead_id, **{k: v.strip() for k, v in fields.items()}})
+        lead_id = f"00QMOCK{self._rng.randrange(10**9):09d}"
         return self._ok(tool, source="salesforce", lead_id=lead_id)
 
     # --------------------------------------------------------------- zendesk
 
-    def _seed_tickets(self) -> None:
-        for ticket in self._fixtures["tickets"]:
-            if self._store.get("ticket", str(ticket["id"])) is None:
-                self._store.put_if_absent("ticket", str(ticket["id"]), {**ticket, "comments": []})
+    def _fixture_ticket(self, ticket_id: str) -> dict[str, Any] | None:
+        return next((dict(ticket) for ticket in self._fixtures["tickets"] if str(ticket["id"]) == ticket_id), None)
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
@@ -520,16 +519,14 @@ class MockToolCallService:
     def zendesk_search(self, query: str, search_type: str) -> dict[str, Any]:
         tool = "zendesk_search"
         if search_type == "tickets":
-            self._seed_tickets()
             if query.strip().lstrip("#").isdigit():
-                ticket = self._store.get("ticket", query.strip().lstrip("#"))
+                ticket = self._fixture_ticket(query.strip().lstrip("#"))
                 tickets = [ticket] if ticket else []
             else:
                 wanted = self._tokens(query)
                 tickets = [
-                    ticket for key in self._store.keys("ticket")
-                    if (ticket := self._store.get("ticket", key))
-                    and wanted & self._tokens(f"{ticket['subject']} {ticket.get('description', '')}")
+                    ticket for ticket in self._fixtures["tickets"]
+                    if wanted & self._tokens(f"{ticket['subject']} {ticket.get('description', '')}")
                 ]
             results = [
                 {
@@ -565,17 +562,14 @@ class MockToolCallService:
 
     def zendesk_add_comment(self, ticket_id: str, comment: str, public: bool) -> dict[str, Any]:
         tool = "zendesk_add_comment"
-        self._seed_tickets()
         key = ticket_id.strip().lstrip("#")
-        ticket = self._store.get("ticket", key)
-        if ticket is None:
+        ticket = self._fixture_ticket(key)
+        if ticket is None and not (key.isdigit() and int(key) in GENERATED_TICKET_IDS):
             return self._fail(tool, "TICKET_NOT_FOUND", f"Ticket {ticket_id} does not exist.", source="zendesk", ticket_id=None)
         updated = self._clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        ticket["comments"] = [*ticket.get("comments", []), {"public": public, "length": len(comment), "at": updated}]
-        if ticket["status"] in {"solved", "pending", "new"}:
-            ticket["status"] = "open"
-        self._store.put("ticket", key, ticket)
-        return self._ok(tool, source="zendesk", ticket_id=ticket["id"], status=ticket["status"], updated_at=updated)
+        # A comment reopens a solved, pending, or new ticket; nothing is stored.
+        status = "open" if ticket is None or ticket["status"] in {"solved", "pending", "new"} else ticket["status"]
+        return self._ok(tool, source="zendesk", ticket_id=int(key), status=status, updated_at=updated)
 
     def zendesk_create_ticket(
         self,
@@ -588,19 +582,7 @@ class MockToolCallService:
         tool = "zendesk_create_ticket"
         if requester_email.strip() and not EMAIL.fullmatch(requester_email.strip()):
             return self._fail(tool, "INVALID_EMAIL", f"Not a valid email address: {requester_email}", source="zendesk", ticket_id=None)
-        self._seed_tickets()
-        number = self._store.next_number("ticket", 1000)
-        ticket = {
-            "id": number,
-            "subject": subject.strip(),
-            "description": description.strip(),
-            "requester_name": requester_name.strip(),
-            "requester_email": requester_email.strip(),
-            "priority": priority,
-            "status": "new",
-            "comments": [],
-        }
-        self._store.put("ticket", str(number), ticket)
+        number = self._rng.choice(GENERATED_TICKET_IDS)
         return self._ok(tool, source="zendesk", ticket_id=number, status="new", priority=priority)
 
     # ---------------------------------------------------------------- twilio
@@ -617,8 +599,7 @@ class MockToolCallService:
                 message_sid=None,
                 status=None,
             )
-        sid = f"SMMOCK{self._store.next_number('sms', 0):026d}"
-        self._store.put("sms", sid, {"sid": sid, "to": number, "body_length": len(body)})
+        sid = f"SMMOCK{self._rng.randrange(10**26):026d}"
         return self._ok(tool, source="twilio", message_sid=sid, status="queued", to=number)
 
     # ---------------------------------------------------------------- orders
@@ -700,15 +681,13 @@ class MockToolCallService:
         return self._ok(tool, check_in=start.isoformat(), check_out=end.isoformat(), nights=nights, guests=guests, rooms=rooms)
 
     def _reservation(self, confirmation_number: str) -> dict[str, Any] | None:
+        """A fixture reservation; reservations created by callers are never stored."""
         key = confirmation_number.strip().upper()
-        stored = self._store.get("reservation", key)
-        if stored is not None:
-            return stored
         for seed in self._fixtures["hotel"]["reservations"]:
             if seed["confirmation_number"] == key:
                 arrival = self._today() + timedelta(days=seed["arrival_days_from_today"])
                 room = next(r for r in self._fixtures["hotel"]["rooms"] if r["room_type"] == seed["room_type"])
-                document = {
+                return {
                     "confirmation_number": key,
                     "first_name": seed["first_name"],
                     "last_name": seed["last_name"],
@@ -722,8 +701,6 @@ class MockToolCallService:
                     "package": "",
                     "status": "confirmed",
                 }
-                self._store.put_if_absent("reservation", key, document)
-                return self._store.get("reservation", key)
         return None
 
     def hotel_create_reservation(
@@ -750,8 +727,7 @@ class MockToolCallService:
         room = rooms[0]
         if not self._room_available(room, start, nights):
             return self._fail(tool, "SOLD_OUT", f"{room['room_type']} is sold out for those nights.", confirmation_number=None)
-        number = self._store.next_number("reservation", 0)
-        code = "M" + _base36(number).rjust(5, "0")
+        code = "M" + _base36(self._rng.randrange(36**5)).rjust(5, "0")
         document = {
             "confirmation_number": code,
             "first_name": first_name.strip(),
@@ -766,7 +742,6 @@ class MockToolCallService:
             "package": package.strip(),
             "status": "confirmed",
         }
-        self._store.put("reservation", code, document)
         return self._ok(tool, **document)
 
     def hotel_get_reservation(self, confirmation_number: str, last_name: str) -> dict[str, Any]:
@@ -781,12 +756,8 @@ class MockToolCallService:
         reservation = self._reservation(confirmation_number)
         if reservation is None or reservation["last_name"].lower() != last_name.strip().lower():
             return self._fail(tool, "RESERVATION_NOT_FOUND", "No reservation matches that confirmation number and last name.")
-        if reservation["status"] == "cancelled":
-            return self._fail(tool, "ALREADY_CANCELLED", "That reservation was already cancelled.")
         arrival = datetime.combine(date.fromisoformat(reservation["check_in"]), time(15), self._zone(self._user_zone_name))
         fee_applies = arrival - self._clock() < timedelta(hours=48)
-        reservation["status"] = "cancelled"
-        self._store.put("reservation", reservation["confirmation_number"], reservation)
         return self._ok(
             tool,
             confirmation_number=reservation["confirmation_number"],
@@ -796,10 +767,9 @@ class MockToolCallService:
 
     # ------------------------------------------------- coaching and research
 
-    def _record(self, tool: str, kind: str, prefix: str, document: dict[str, Any]) -> dict[str, Any]:
-        record_id = f"{prefix}-{self._store.next_number(kind, 1000)}"
-        self._store.put(kind, record_id, {"id": record_id, **document})
-        return self._ok(tool, record_id=record_id, saved=True)
+    def _record(self, tool: str, prefix: str) -> dict[str, Any]:
+        """Acknowledge a record write with a generated ID; the record itself is not stored."""
+        return self._ok(tool, record_id=f"{prefix}-{self._rng.randrange(1000, 10000)}", saved=True)
 
     def quiz_record_result(
         self,
@@ -813,10 +783,7 @@ class MockToolCallService:
         tool = "quiz_record_result"
         if score > total or passing_score > total:
             return self._fail(tool, "INVALID_SCORE", "score and passing_score cannot exceed total.")
-        result = self._record(tool, "quiz", "QR", {
-            "quiz_name": quiz_name, "participant_name": participant_name, "score": score,
-            "total": total, "passing_score": passing_score, "missed_questions": missed_questions,
-        })
+        result = self._record(tool, "QR")
         return {**result, "passed": score >= passing_score, "score": score, "total": total}
 
     def training_record_session(
@@ -826,10 +793,7 @@ class MockToolCallService:
         scores: dict[str, int],
         key_takeaway: str,
     ) -> dict[str, Any]:
-        return self._record("training_record_session", "training", "TS", {
-            "scenario": scenario, "participant_name": participant_name, "scores": scores,
-            "key_takeaway": key_takeaway,
-        })
+        return self._record("training_record_session", "TS")
 
     def research_save_interview_notes(
         self,
@@ -841,9 +805,7 @@ class MockToolCallService:
         tool = "research_save_interview_notes"
         if not consent_given:
             return self._fail(tool, "CONSENT_REQUIRED", "Notes are saved only with the participant's consent.")
-        return self._record(tool, "research", "RN", {
-            "participant_name": participant_name, "summary_length": len(summary), "ratings": ratings,
-        })
+        return self._record(tool, "RN")
 
 
 class UnknownTimeZone(ValueError):

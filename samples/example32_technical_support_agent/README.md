@@ -63,8 +63,8 @@ Fixed mock data (see the
   401 Unauthorized", and the GlobalProtect VPN and password or MFA articles.
 - CRM contact Jack Rogers, `jrogers@burlington.com`, phone +13362227000,
   Burlington Textiles Corp of America.
-- Ticket **3** is open (API returns 401; Jack Rogers). New tickets are numbered
-  from 1001.
+- Ticket **3** is open (API returns 401; Jack Rogers). New tickets get a
+  random four-digit number.
 
 ## Run in the portal
 
@@ -84,7 +84,7 @@ for each system.
   one step at a time from "Troubleshoot data sync failures", naming the title.
 - "Still broken, escalate it, high urgency." Expect a read-back with no tool
   call. After "yes", expect one `mock_tool_call_zendesk_create_ticket` call, a
-  ticket number from 1001 up, and a response within one business day.
+  four-digit ticket number, and a response within one business day.
 - "Please add to ticket 3 that it started after the key rotation." Expect the
   comment read back and, after "yes", one `mock_tool_call_zendesk_add_comment`
   call on ticket 3.

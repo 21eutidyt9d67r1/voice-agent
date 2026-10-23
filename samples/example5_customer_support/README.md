@@ -67,7 +67,7 @@ and [`fixtures.json`](../../shared_mcp/app/shared_mcp/mock_tool_call/fixtures.js
   Facilities, Burlington Textiles Corp of America. Any other email, such as
   `dana.test20261020@example.com`, finds no contact.
 - Existing tickets: 1 (solved), 2 (pending), and 3 (open, API returns 401;
-  Jack Rogers). New tickets are numbered from 1001.
+  Jack Rogers). New tickets get a random four-digit number.
 
 ## Run in the portal
 
@@ -95,7 +95,7 @@ and `silence_duration_ms: 400`.
 - In a new call, "My data sync keeps failing, escalate it, high urgency."
   Expect questions for any missing name or contact, then a read-back. Say "no,
   not yet": expect nothing filed. After a later "yes", expect one
-  `mock_tool_call_zendesk_create_ticket` call and a ticket number from 1001 up.
+  `mock_tool_call_zendesk_create_ticket` call and a four-digit ticket number.
 - "Check my account: jrogers@burlington.com." Expect the email spelled back, a
   `mock_tool_call_salesforce_search` call, and a request for your full name
   before any details. With an unknown email, expect no contact found and only

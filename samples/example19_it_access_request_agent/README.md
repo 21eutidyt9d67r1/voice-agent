@@ -70,7 +70,7 @@ Fixed mock data (see the
 - Directory contacts that verify: Jack Rogers, `jrogers@burlington.com` (VP,
   Facilities); Rose Gonzalez, `rose@edge.com` (SVP, Procurement). Any other
   email, or a name that does not match, cannot be verified.
-- New tickets are numbered from 1001.
+- New tickets get a random four-digit number; the mock does not keep them.
 
 ## Run in the portal
 
@@ -90,7 +90,7 @@ for each system.
   home." Expect `mock_tool_call_salesforce_search`, a short mention of the VP,
   Facilities title, then a standard classification and a read-back.
 - "Yes, file it." Expect `mock_tool_call_zendesk_create_ticket` once and a
-  ticket number (1001 or higher), with no claim that access was granted.
+  four-digit ticket number, with no claim that access was granted.
 - "I need write access to a GitHub repository." Expect a question for your
   manager's email and the manager named as approver in the read-back.
 - "I need read access to the production database." Expect restricted, the

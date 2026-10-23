@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import random
+import re
 import socket
 import sys
 import unittest
@@ -21,19 +24,14 @@ from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
 from shared_mcp.mock_tool_call import pack  # noqa: E402
 from shared_mcp.mock_tool_call.server import register_tools  # noqa: E402
 from shared_mcp.mock_tool_call.service import MockToolCallService  # noqa: E402
-from shared_mcp.mock_tool_call.store import (  # noqa: E402
-    MemoryStateStore,
-    RedisStateStore,
-    store_from_environment,
-)
 
 # Tuesday 2026-10-20 10:00 Pacific.
 NOW = datetime(2026, 10, 20, 17, 0, tzinfo=timezone.utc)
 
 
-def build(store: Any = None) -> FastMCP:
+def build(service: MockToolCallService | None = None) -> FastMCP:
     mcp = FastMCP("mock-tool-call")
-    register_tools(mcp, MockToolCallService(store or MemoryStateStore(), clock=lambda: NOW))
+    register_tools(mcp, service or MockToolCallService(clock=lambda: NOW, rng=random.Random(7)))
     return mcp
 
 
@@ -53,37 +51,6 @@ def call(mcp: FastMCP, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
 def tools(mcp: FastMCP) -> dict[str, Any]:
     return {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
-
-
-class FakeRedis:
-    def __init__(self) -> None:
-        self.values: dict[str, Any] = {}
-        self.sets: dict[str, set[str]] = {}
-        self.ttl: dict[str, int] = {}
-
-    def get(self, key: str) -> Any:
-        return self.values.get(key)
-
-    def set(self, key: str, value: Any, ex: int | None = None, nx: bool = False) -> bool:
-        if nx and key in self.values:
-            return False
-        self.values[key] = str(value)
-        if ex:
-            self.ttl[key] = ex
-        return True
-
-    def sadd(self, key: str, member: str) -> None:
-        self.sets.setdefault(key, set()).add(member)
-
-    def smembers(self, key: str) -> set[str]:
-        return set(self.sets.get(key, set()))
-
-    def expire(self, key: str, seconds: int) -> None:
-        self.ttl[key] = seconds
-
-    def incr(self, key: str) -> int:
-        self.values[key] = str(int(self.values.get(key, 0)) + 1)
-        return int(self.values[key])
 
 
 class EchoContractTests(unittest.TestCase):
@@ -158,9 +125,10 @@ class EchoContractTests(unittest.TestCase):
         self.assertEqual(first, call(self.mcp, "mock_tool_call_echo", arguments))
         self.assertEqual(first, call(build(), "mock_tool_call_echo", arguments))
 
-    def test_registration_needs_no_network_and_defaults_to_memory(self) -> None:
+    def test_registration_needs_no_network_or_state_store(self) -> None:
+        # The hosted service still sets the shared-state flag for other packs; this pack ignores it.
         with patch.object(socket, "create_connection", side_effect=AssertionError("network")), patch.dict(
-            "os.environ", {}, clear=True,
+            "os.environ", {"NOAUTH_MCP_REQUIRE_SHARED_STATE": "true"}, clear=True,
         ):
             mcp = FastMCP("mock-tool-call")
             pack.register(mcp)
@@ -200,21 +168,23 @@ class BusinessToolTests(unittest.TestCase):
             "isOnlineMeeting": True,
         })
         self.assertTrue(created["ok"])
+        self.assertRegex(created["id"], r"^mock-evt-[0-9a-f]{8}$")
         self.assertIn("joinUrl", created["onlineMeeting"])
+        # Nothing is stored, so the booked slot stays free and listings show only the seeds.
         again = call(self.mcp, "mock_tool_call_find_meeting_times", {
             "meetingDuration": "PT30M",
             "startDateTime": "2026-10-22T09:00:00",
             "endDateTime": "2026-10-22T10:00:00",
             "timeZone": "Pacific Standard Time",
         })
-        self.assertEqual(again["meetingTimeSuggestions"], [])
+        self.assertTrue(again["meetingTimeSuggestions"])
         listed = call(self.mcp, "mock_tool_call_list_calendar_view", {
             "startDateTime": "2026-10-22T00:00:00",
             "endDateTime": "2026-10-22T23:59:00",
             "timeZone": "Pacific Standard Time",
             "subject": "Dana Test",
         })
-        self.assertEqual([event["id"] for event in listed["value"]], [created["id"], "mock-evt-seed-1"])
+        self.assertEqual([event["id"] for event in listed["value"]], ["mock-evt-seed-1"])
         moved = call(self.mcp, "mock_tool_call_update_event", {
             "eventId": created["id"],
             "startDateTime": "2026-10-23T11:00:00",
@@ -222,11 +192,24 @@ class BusinessToolTests(unittest.TestCase):
             "timeZone": "Pacific Standard Time",
         })
         self.assertEqual(moved["start"]["dateTime"], "2026-10-23T11:00:00.0000000")
+        partial = call(self.mcp, "mock_tool_call_update_event", {"eventId": created["id"], "subject": "Renamed"})
+        self.assertEqual(partial["error"]["code"], "INVALID_ARGUMENT")
+        reseeded = call(self.mcp, "mock_tool_call_update_event", {
+            "eventId": "mock-evt-seed-2",
+            "startDateTime": "2026-10-23T15:00:00",
+            "endDateTime": "2026-10-23T16:00:00",
+            "timeZone": "Pacific Standard Time",
+        })
+        self.assertEqual(reseeded["subject"], "Initial consultation with Jordan Lee")
         cancelled = call(self.mcp, "mock_tool_call_cancel_event", {"eventId": "mock-evt-seed-1"})
         self.assertTrue(cancelled["cancelled"])
+        # The seed is not left cancelled for the next caller.
         twice = call(self.mcp, "mock_tool_call_cancel_event", {"eventId": "mock-evt-seed-1"})
-        self.assertFalse(twice["ok"])
-        self.assertEqual(twice["error"]["code"], "EVENT_CANCELLED")
+        self.assertTrue(twice["ok"])
+        created_cancel = call(self.mcp, "mock_tool_call_cancel_event", {"eventId": created["id"]})
+        self.assertTrue(created_cancel["cancelled"])
+        unknown = call(self.mcp, "mock_tool_call_cancel_event", {"eventId": "evt-made-up"})
+        self.assertEqual(unknown["error"]["code"], "EVENT_NOT_FOUND")
 
     def test_seed_event_is_next_thursday(self) -> None:
         listed = call(self.mcp, "mock_tool_call_list_calendar_view", {
@@ -258,9 +241,18 @@ class BusinessToolTests(unittest.TestCase):
         created = call(self.mcp, "mock_tool_call_zendesk_create_ticket", {
             "subject": "Escalation", "description": "Nothing worked", "priority": "high",
         })
-        self.assertEqual((created["ticket_id"], created["status"], created["priority"]), (1001, "new", "high"))
-        lookup = call(self.mcp, "mock_tool_call_zendesk_search", {"query": "1001", "type": "tickets"})
-        self.assertEqual(lookup["results"][0]["title"], "Escalation")
+        self.assertEqual((created["status"], created["priority"]), ("new", "high"))
+        self.assertTrue(1000 <= created["ticket_id"] <= 9999)
+        follow_up = call(self.mcp, "mock_tool_call_zendesk_add_comment", {
+            "ticket_id": str(created["ticket_id"]), "comment": "More detail",
+        })
+        self.assertEqual((follow_up["ticket_id"], follow_up["status"]), (created["ticket_id"], "open"))
+        lookup = call(self.mcp, "mock_tool_call_zendesk_search", {
+            "query": str(created["ticket_id"]), "type": "tickets",
+        })
+        self.assertEqual(lookup["count"], 0)
+        fixture = call(self.mcp, "mock_tool_call_zendesk_search", {"query": "401 unauthorized", "type": "tickets"})
+        self.assertEqual([result["id"] for result in fixture["results"]], [3])
 
     def test_sms_success_and_failure(self) -> None:
         sent = call(self.mcp, "mock_tool_call_twilio_send_message", {"to": "+1 978 627 7446", "body": "Hi"})
@@ -274,7 +266,7 @@ class BusinessToolTests(unittest.TestCase):
 
     def test_lead_presence_mail_and_order(self) -> None:
         lead = call(self.mcp, "mock_tool_call_salesforce_create_lead", {"last_name": "Test", "company": "Fabrikam"})
-        self.assertEqual(lead["lead_id"], "00QMOCK000000001")
+        self.assertRegex(lead["lead_id"], r"^00QMOCK\d{9}$")
         presence = call(self.mcp, "mock_tool_call_get_user_presence", {"userEmail": "meganb@contoso.com"})
         self.assertEqual(presence["availability"], "Busy")
         mail = call(self.mcp, "mock_tool_call_send_email_with_attachments", {
@@ -296,11 +288,20 @@ class BusinessToolTests(unittest.TestCase):
             "first_name": "Dana", "last_name": "Test", "email": "dana.test20261020@example.com",
             "room_type": "Classic King", "check_in": "2026-10-23", "check_out": "2026-10-25", "guests": 2,
         })
-        self.assertEqual(booked["confirmation_number"], "M00001")
+        self.assertRegex(booked["confirmation_number"], r"^M[0-9A-Z]{5}$")
+        not_kept = call(self.mcp, "mock_tool_call_hotel_get_reservation", {
+            "confirmation_number": booked["confirmation_number"], "last_name": "Test",
+        })
+        self.assertEqual(not_kept["error"]["code"], "RESERVATION_NOT_FOUND")
         found = call(self.mcp, "mock_tool_call_hotel_get_reservation", {"confirmation_number": "a1b2c3", "last_name": "test"})
         self.assertEqual(found["reservation"]["room_type"], "Classic King")
         cancelled = call(self.mcp, "mock_tool_call_hotel_cancel_reservation", {"confirmation_number": "A1B2C3", "last_name": "Test"})
         self.assertEqual((cancelled["status"], cancelled["cancellation_fee"]), ("cancelled", 0))
+        # The seed reservation is not left cancelled for the next caller.
+        again = call(self.mcp, "mock_tool_call_hotel_get_reservation", {
+            "confirmation_number": "A1B2C3", "last_name": "Test",
+        })
+        self.assertEqual(again["reservation"]["status"], "confirmed")
 
     def test_coaching_and_research_records(self) -> None:
         quiz = call(self.mcp, "mock_tool_call_quiz_record_result", {
@@ -311,32 +312,75 @@ class BusinessToolTests(unittest.TestCase):
             "scenario": "Angry customer", "communication": 4, "objection_handling": 3,
             "empathy": 5, "resolution": 3, "key_takeaway": "Name the next step.",
         })
-        self.assertEqual(session["record_id"], "TS-1001")
+        self.assertRegex(session["record_id"], r"^TS-\d{4}$")
         refused = call(self.mcp, "mock_tool_call_research_save_interview_notes", {
             "consent_given": False, "summary": "Plans in a spreadsheet.",
         })
         self.assertEqual(refused["error"]["code"], "CONSENT_REQUIRED")
 
 
-class StateStoreTests(unittest.TestCase):
-    def test_redis_store_uses_its_own_prefix_and_ttl(self) -> None:
-        client = FakeRedis()
-        store = RedisStateStore(client, key_prefix="test:noauth", ttl_seconds=3600)
-        mcp = build(store)
-        call(mcp, "mock_tool_call_zendesk_create_ticket", {"subject": "S", "description": "D"})
-        self.assertTrue(all(key.startswith("test:noauth:mock-tool-call:") for key in client.values))
-        self.assertTrue(all(value == 3600 for value in client.ttl.values()))
-        self.assertIn("1001", client.smembers("test:noauth:mock-tool-call:ticket:index"))
-        other = build(RedisStateStore(client, key_prefix="test:noauth", ttl_seconds=3600))
-        shared = call(other, "mock_tool_call_zendesk_add_comment", {"ticket_id": "1001", "comment": "seen"})
-        self.assertTrue(shared["ok"])
+class NoRetentionTests(unittest.TestCase):
+    """Caller-provided data must never be kept or shown to a later caller."""
 
-    def test_environment_selects_redis_lazily_and_fails_closed(self) -> None:
-        self.assertIsInstance(store_from_environment({}), MemoryStateStore)
-        lazy = store_from_environment({"NOAUTH_MCP_REDIS_URL": "rediss://redis.example:6380/0"})
-        self.assertEqual(type(lazy).__name__, "LazyRedisStateStore")
-        with self.assertRaisesRegex(ValueError, "REDIS_URL is required"):
-            store_from_environment({"NOAUTH_MCP_REQUIRE_SHARED_STATE": "true"})
+    SECRET = "Zyxwvut Qqqprivate"
+
+    def test_writes_leave_no_caller_data_behind(self) -> None:
+        service = MockToolCallService(clock=lambda: NOW, rng=random.Random(11))
+        attributes = set(vars(service))
+        fixtures = copy.deepcopy(service._fixtures)
+        mcp = build(service)
+        email = "zyxwvut.private@example.com"
+        writes = [
+            ("mock_tool_call_create_event", {
+                "subject": f"Visit with {self.SECRET}", "startDateTime": "2026-10-22T09:00:00",
+                "endDateTime": "2026-10-22T09:30:00", "timeZone": "Pacific Standard Time",
+                "attendeeEmails": [email], "body": self.SECRET,
+            }),
+            ("mock_tool_call_zendesk_create_ticket", {
+                "subject": self.SECRET, "description": self.SECRET, "requester_name": self.SECRET,
+                "requester_email": email,
+            }),
+            ("mock_tool_call_zendesk_add_comment", {"ticket_id": "3", "comment": self.SECRET}),
+            ("mock_tool_call_salesforce_create_lead", {
+                "last_name": self.SECRET, "company": self.SECRET, "email": email,
+            }),
+            ("mock_tool_call_send_email_with_attachments", {"to": email, "subject": self.SECRET, "body": self.SECRET}),
+            ("mock_tool_call_twilio_send_message", {"to": "+14255550199", "body": self.SECRET}),
+            ("mock_tool_call_hotel_create_reservation", {
+                "first_name": self.SECRET, "last_name": self.SECRET, "email": email,
+                "room_type": "Classic King", "check_in": "2026-10-23", "check_out": "2026-10-24", "guests": 1,
+            }),
+            ("mock_tool_call_research_save_interview_notes", {
+                "consent_given": True, "participant_name": self.SECRET, "summary": self.SECRET,
+            }),
+        ]
+        for name, arguments in writes:
+            with self.subTest(tool=name):
+                self.assertTrue(call(mcp, name, arguments)["ok"])
+        # No new attribute holds caller data, and the fixtures were not modified in place.
+        self.assertEqual(set(vars(service)), attributes)
+        self.assertEqual(service._fixtures, fixtures)
+        reads = [
+            ("mock_tool_call_list_calendar_view", {
+                "startDateTime": "2026-10-22T00:00:00", "endDateTime": "2026-10-22T23:59:00",
+                "timeZone": "Pacific Standard Time", "subject": "",
+            }),
+            ("mock_tool_call_zendesk_search", {"query": self.SECRET, "type": "tickets"}),
+            ("mock_tool_call_zendesk_search", {"query": "401", "type": "tickets"}),
+            ("mock_tool_call_salesforce_search", {"email": email}),
+        ]
+        for name, arguments in reads:
+            with self.subTest(tool=name):
+                text = json.dumps(call(mcp, name, arguments))
+                self.assertNotIn("Zyxwvut", text)
+                self.assertNotIn("zyxwvut", text)
+
+    def test_ids_are_not_sequential_across_callers(self) -> None:
+        first = call(build(), "mock_tool_call_zendesk_create_ticket", {"subject": "S", "description": "D"})
+        other = build(MockToolCallService(clock=lambda: NOW, rng=random.Random(99)))
+        second = call(other, "mock_tool_call_zendesk_create_ticket", {"subject": "S", "description": "D"})
+        self.assertNotEqual(first["ticket_id"], second["ticket_id"])
+        self.assertTrue(re.fullmatch(r"\d{4}", str(second["ticket_id"])))
 
 
 if __name__ == "__main__":

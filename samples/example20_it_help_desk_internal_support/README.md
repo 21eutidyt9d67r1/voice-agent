@@ -60,7 +60,8 @@ Fixed mock data (see the
   VPN, GlobalProtect, or authentication failed; sync failure; API 401 or token;
   install software or Company Portal; monitor flicker; Wi-Fi.
 - Existing tickets: 1 (solved), 2 (pending), and 3 (open, API returns 401).
-  Comments work only on an existing ticket; new tickets are numbered from 1001.
+  Comments work on these tickets; new tickets get a random four-digit number and are not
+  kept.
 
 ## Run in the portal
 

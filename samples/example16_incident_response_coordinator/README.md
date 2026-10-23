@@ -65,8 +65,8 @@ Fixed mock data (see the
 
 - A text to any valid E.164 number, including the directory numbers, is
   `queued`; nothing is delivered.
-- New tickets are numbered from 1001, so the incident ID keeps counting up
-  across Playground users.
+- New tickets get a random four-digit number. The mock keeps nothing callers say, so a new
+  incident cannot be looked up later.
 
 ## Run in the portal
 
