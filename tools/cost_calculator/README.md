@@ -133,7 +133,7 @@ Global, Data Zone, Batch, or fine-tuning meters.
 ## Assumptions and formulas
 
 Defaults use the supplied **90-second call**, **4 user + 4 agent
-turns**, **45 seconds of speech each**, **100% reused-context caching**,
+turns**, **45 seconds of speech allocation each before silence**, **100% reused-context caching**,
 and **150 agent text tokens**
 for text-response pipelines. User transcript length was not supplied:
 the calculator explicitly assumes an editable **150 user text tokens**.
@@ -142,8 +142,24 @@ These defaults are modeling inputs, not measured usage.
 Audio defaults follow
 [Voice Live's Azure OpenAI estimates](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live#token-usage-and-cost-estimation):
 **10 input audio tokens/sec** and **20 output audio tokens/sec**, giving
-**450 input** and **900 output** audio tokens per default call. Both rates
+**450 input** and **900 output** audio tokens before the silence adjustment. Both rates
 remain editable for other model families or measured usage.
+
+**Both-parties-silent ratio defaults to 20%** and is editable from 0 to 100%.
+The suggested 10-30% range is a planning assumption, not a universal average.
+Multiply each side's entered speech seconds by `1 - silencePercent / 100`
+before calculating audio tokens. The default therefore models **36 seconds
+per side**, **360 input tokens**, and **720 output tokens**, with 18 seconds
+of both-parties silence in the 90-second call.
+This scales fresh and replayed native audio, STT, and TTS usage only, not
+unit prices. Text, prompt, reasoning, turn count, GPT Live session minutes,
+and the full-call per-minute denominator remain unchanged. It is not a
+blanket cost discount or a guarantee that silence is unbilled. Set the ratio
+to **0%** when entered speech times already exclude silence to avoid double
+counting. With smaller baseline speech allocations, the ratio reduces only
+those allocations; it does not subtract additional time from the full call.
+The summary shows adjusted audio usage; CSV includes `silence_percent` and
+the complete assumptions.
 
 Each call starts cold; the system prompt costs `P * input_rate` on its
 first turn. Its `P * (turns - 1)` reused tokens are charged at the selected
