@@ -219,7 +219,8 @@ location such as the repository's `voice-agent-output` directory.
 ## Recorded voice-in/voice-out demonstration
 
 On October 24, 2026, **one agent with `store=True`** completed four distinct
-audio sessions with **real-time input pacing** (three spoken user/assistant exchanges each). Input was
+audio sessions with **real-time input pacing and full headless reply-duration
+waits** (three spoken user/assistant exchanges each). Input was
 synthetic English speech generated locally with Windows System.Speech.
 All 12 turns sent real PCM input and received nonempty PCM output; 12 returned
 agent WAVs were saved. Each of the four conversations was read back as
@@ -272,10 +273,13 @@ Real-time input pacing was initially checked in a separate live audio probe:
 9.4245 seconds of recorded speech was sent in 10.222 seconds across 95 chunks,
 with a minimum full-chunk interval of 100.28 ms. The service returned actual
 spoken output and the temporary probe agent was deleted. The complete
-four-session suite was then rerun with real-time input pacing and again
-produced two passes, two intended failures, and zero evaluation errors.
-The table above reflects that full paced-input rerun, which exited successfully.
-Neither run plays output through local speakers.
+four-session suite was then rerun with real-time input pacing and full
+headless reply-duration waits. All 12 actual waits were checked against the
+saved WAV durations: 652.350 seconds of reply audio received 652.483 seconds
+of total headless waiting. For example, a 132.438-second reply was followed
+by a 132.449-second wait before the next query. The table above reflects
+this complete rerun: two passes, two intended failures, zero evaluation errors,
+and a successful exit. No output was played through local speakers.
 
 ## Offline checks
 
