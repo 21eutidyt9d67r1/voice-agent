@@ -12,6 +12,7 @@ panes; delegation IDs, status, and guidance appear in the Delegation pane.
 | --- | --- |
 | `response_delegation.py` | Checks deployments, runs the voice conversation, and prints its ID and download command. |
 | `prompt_agent_delegation.py` | Creates a prompt agent first, creates a GPT Live voice agent pinned to it, and runs the shared voice conversation. |
+| `prompt_agent_delegation_tools.py` | Adds a server-executed MCP calculator and a client-executed current date/time function to the managed prompt agent. |
 | `audio_common.py` | Captures microphone audio and plays the agent's response. |
 | `transcript_common.py` | Independently scrollable GPT Live, Delegation, and User terminal panes. |
 | `../download_conversation_artifacts.py` | Existing separate downloader for conversation JSON, per-item audio, and merged audio. |
@@ -125,6 +126,10 @@ existing agents untouched:
 
 Ask: **"Please correct my English: I goed to school yesterday. Explain why."**
 Managed start/progress/completion/failure events appear in the Delegation pane.
+The service also emits `session.delegation.created` with
+`delegation.target="foundry_managed_agent"` as an ownership notification, not a
+request for the client to execute the prompt agent. Native `client` or `responses`
+targets are rejected in managed mode; no fallback executor is started.
 The `[thinking]` section is factual background, not private reasoning. Accepted
 backend guidance is kept separate from the transcript of what GPT Live says.
 Failures stay visible without a client-side retry or fallback executor.
@@ -140,3 +145,48 @@ Prompt/backend conversations follow their own persistence policy, independently
 of the voice agent's `store` setting. The sample does not set `store` on the prompt
 definition. `--auto-delete` deletes the two agent resources; it is not a separate
 purge of backend responses or conversations.
+
+## Managed prompt agent with MCP and local function tools
+
+Use the same setup and `.env`, then run:
+
+```powershell
+.\.venv\Scripts\python.exe samples\gpt_live\prompt_agent_delegation_tools.py
+```
+
+The new prompt agent has two tools:
+
+- **MCP calculator:** the public, unauthenticated
+  `https://voice-mcp-auth-tests.graysky-8afcdfd2.eastus2.azurecontainerapps.io/noauth/mcp`
+  server. Only its `add(a, b)` tool is exposed; both arguments are integers.
+  Foundry calls this server directly, with `require_approval="never"` and no
+  credentials. This test endpoint is not a production dependency.
+- **`get_current_datetime`:** a local Python function returning the sample
+  computer's current local time, timezone, and corresponding UTC time as ISO 8601
+  timestamps with UTC offsets. It takes no arguments.
+
+Try **"What is 17 plus 25?"**, **"What is the current date and time?"**, or
+**"Add 17 and 25, and tell me the current date and time."**
+
+This still uses `foundry_managed_agent`, not client delegation or a direct
+Responses fallback. It requires a backend deployment with **managed client-function
+continuation** support. The client collects completed `function_call` items from
+`response.event` observations, waits for `response.completed`, submits each
+`function_call_output` using `connection.response.item.create`, then sends one
+`connection.response.create` to resume the same managed delegation. Foundry owns
+the prompt-agent conversation and forwards only validated tagged-text guidance
+to GPT Live; the client never speaks raw tool output.
+
+Keep the script running to execute the local clock function. `--create-only` and
+`--auto-delete` behave as in the original managed example, but creating the agents
+alone does not prove that the deployed backend supports function continuation.
+A different client reconnecting to these agents must implement that handler too;
+the basic `response_delegation.py` client does not execute their local function.
+No additional packages or `.env` settings are needed.
+
+Run the offline payload, function-continuation, cleanup, and SDK loopback tests
+(no Azure resources or audio devices):
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s samples/gpt_live -p "test_*.py" -v
+```

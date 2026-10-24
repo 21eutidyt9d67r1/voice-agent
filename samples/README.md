@@ -34,6 +34,7 @@ independent shared MCP reference implementation, start with the
 | [Data Zone and regional realtime Voice Agents](realtime_datazone_voice_agent.md) | Create or reuse a voice-first Agent with an explicit managed model and hands-free microphone conversation. See the sample guide for region/model combinations and routing prerequisites. |
 | [Foundry GPT Live with Responses delegation](gpt_live/README.md) | Create an English-teacher agent or reuse `AGENT_NAME`, stream microphone audio with Responses delegation, and print the conversation ID and download command after close. |
 | [Foundry GPT Live with managed prompt-agent delegation](gpt_live/README.md#managed-prompt-agent-delegation) | Create a prompt agent first, pin its version to a new GPT Live voice agent, then stream microphone audio with Foundry-managed delegation. |
+| [Foundry GPT Live with prompt-agent tools](gpt_live/README.md#managed-prompt-agent-with-mcp-and-local-function-tools) | Give the managed prompt agent an MCP addition calculator and a local current date/time function. |
 | [`voice_agent_with_mcp.py`](voice_agent_with_mcp.py) | Create an MCP Agent, converse through the microphone, and display tool arguments and output. |
 | [`voice_agent_with_foundry_iq.py`](voice_agent_with_foundry_iq.py) | Create a Foundry IQ Agent, converse through the microphone, and display tool activity. |
 | [`voice_agent_with_local_function.py`](voice_agent_with_local_function.py) | Execute `add_numbers` in the client, return its output, and hear the response. |

@@ -92,6 +92,7 @@ async def converse(
     backend_model: str,
     *,
     managed_delegation: bool = False,
+    event_handler=None,
 ) -> str | None:
     """The whole SDK event/audio loop is here so the sample can be read on its own."""
     events = connection.__aiter__()
@@ -108,6 +109,8 @@ async def converse(
 
     async def observe(event):
         nonlocal closed
+        if event_handler is not None:
+            await event_handler(connection, event, transcript)
         if event.type == "error":
             raise DemoError(f"Live error: {event.error.message}")
         if event.type == "session.output_audio.delta":
@@ -155,13 +158,23 @@ async def converse(
                 text=text,
             )
         elif event.type == "session.delegation.created":
-            if managed_delegation:
-                raise DemoError(
-                    "Expected Foundry-managed delegation, but received a native "
-                    "delegation trigger. Check that the service supports "
-                    "foundry_managed_agent with tagged_text; no client fallback was run."
-                )
             delegation = event.delegation
+            if managed_delegation:
+                # Managed sessions retain the native event name, but Foundry
+                # projects its target to indicate that the service owns execution.
+                if delegation.target != "foundry_managed_agent":
+                    raise DemoError(
+                        "Expected Foundry-managed delegation, but received "
+                        f"delegation target '{delegation.target}'. Check that the "
+                        "service supports foundry_managed_agent with tagged_text; "
+                        "no client fallback was run."
+                    )
+                transcript.update_agent_activity(
+                    delegation.id,
+                    title=f"Managed delegation → {backend_model}",
+                    status="Prompt agent delegation requested",
+                )
+                return
             transcript.update_agent_activity(
                 delegation.id,
                 title=f"Delegation → {backend_model if delegation.target == 'responses' else delegation.target}",

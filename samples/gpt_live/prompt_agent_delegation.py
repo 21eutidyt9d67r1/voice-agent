@@ -99,7 +99,15 @@ def voice_agent_payload(name, model, prompt_name, prompt_version):
     }
 
 
-async def main(*, create_only=False, auto_delete=False):
+async def main(
+    *,
+    create_only=False,
+    auto_delete=False,
+    prompt_payload=None,
+    voice_payload=None,
+    event_handler=None,
+):
+    """Share the managed-agent lifecycle with the tools example."""
     base = project_endpoint()
     deployments = {
         "GPT_LIVE_DEPLOYMENT": required("GPT_LIVE_DEPLOYMENT"),
@@ -141,7 +149,7 @@ async def main(*, create_only=False, auto_delete=False):
                 response = await http.post(
                     f"{base}/agents",
                     params={"api-version": API_VERSION},
-                    json=prompt_agent_payload(
+                    json=(prompt_payload or prompt_agent_payload)(
                         prompt_name, deployments["RESPONSE_DELEGATION_DEPLOYMENT"]
                     ),
                 )
@@ -151,7 +159,7 @@ async def main(*, create_only=False, auto_delete=False):
                 print(f"Created prompt agent: {prompt_name}:{prompt_version}", flush=True)
 
                 # 2. Create GPT Live with a pinned managed-agent reference, NOT responses.
-                payload = voice_agent_payload(
+                payload = (voice_payload or voice_agent_payload)(
                     voice_name,
                     deployments["GPT_LIVE_DEPLOYMENT"],
                     prompt_name,
@@ -195,7 +203,8 @@ async def main(*, create_only=False, auto_delete=False):
 
                 # 3. The same OpenAI Live SDK transport as the original sample.
                 # Foundry owns prompt execution, backend conversations, and forwarding
-                # accepted commentary/thinking. There is no client-side tool executor.
+                # accepted commentary/thinking. The tools example additionally handles
+                # explicit backend function calls through event_handler.
                 async with AsyncOpenAI(
                     api_key=auth.token_provider,
                     base_url=f"{agent_url}/endpoint/protocols/voice",
@@ -222,6 +231,7 @@ async def main(*, create_only=False, auto_delete=False):
                                 transcript,
                                 f"{prompt_name}:{prompt_version}",
                                 managed_delegation=True,
+                                event_handler=event_handler,
                             )
                 if conversation_id:
                     print(f"Conversation id: {conversation_id}", flush=True)
@@ -262,8 +272,8 @@ async def main(*, create_only=False, auto_delete=False):
                     )
 
 
-def run_cli():
-    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+def run_cli(main_function=None, *, description=__doc__):
+    parser = argparse.ArgumentParser(description=description, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--create-only",
@@ -278,7 +288,11 @@ def run_cli():
     args = parser.parse_args()
     try:
         load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
-        asyncio.run(main(create_only=args.create_only, auto_delete=args.auto_delete))
+        asyncio.run(
+            (main_function or main)(
+                create_only=args.create_only, auto_delete=args.auto_delete
+            )
+        )
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         raise SystemExit(130)
