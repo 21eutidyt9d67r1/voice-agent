@@ -98,6 +98,15 @@ and `return-1.wav` through `return-3.wav`. These are **actual synthesized speech
 waveforms**, not text messages sent to the agent. The same three travel files
 are reused in the travel positive/negative sessions, likewise for return files.
 
+Input is streamed at **real-time speed**, not uploaded as fast as possible:
+each 4800-byte PCM chunk represents 100 ms at 24 kHz, mono, 16-bit. The sender
+waits for that duration minus the time spent sending the chunk; a shorter final
+chunk gets its proportional delay. The input buffer is committed only after
+the final chunk's duration has elapsed. Slow sends may take longer, but do not
+cause catch-up bursts. Thus five seconds of input speech takes approximately
+five seconds to send, or longer if the connection is slow. This paces recorded
+speech; it does not turn the sample into a live microphone or speaker player.
+
 Sign in and run. This command retains the stored agent and evaluation for
 inspection, writes actual output audio, and exports the full evidence receipt:
 
@@ -248,6 +257,13 @@ saved in a local receipt. The demonstration agent and evaluation were retained
 for inspection with `--keep-resources`; the temporary judge deployment was
 removed. The earlier text-only/four-agent demonstration is superseded by this
 one-agent audio run and is not used as evidence of current voice behavior.
+
+Real-time input pacing was subsequently checked in a separate live audio probe:
+9.4245 seconds of recorded speech was sent in 10.222 seconds across 95 chunks,
+with a minimum full-chunk interval of 100.28 ms. The service returned actual
+spoken output and the temporary probe agent was deleted. This verifies input
+pacing, not output playback or a new four-case evaluation; the evaluation
+results above were captured before the pacing change.
 
 ## Offline checks
 

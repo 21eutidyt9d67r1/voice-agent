@@ -13,6 +13,7 @@ import wave
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Literal, TypedDict
 
 from azure.ai.projects.aio import AIProjectClient
@@ -194,7 +195,11 @@ async def ask(
     connection: AsyncBetaRealtimeConnection, pcm: bytes, fault: str | None = None,
 ) -> tuple[str, str, bytes]:
     for offset in range(0, len(pcm), CHUNK_BYTES):
-        await connection.input_audio_buffer.append(audio=pcm[offset:offset + CHUNK_BYTES])
+        chunk = pcm[offset:offset + CHUNK_BYTES]
+        deadline = perf_counter() + len(chunk) / (SAMPLE_RATE * SAMPLE_WIDTH)
+        await connection.input_audio_buffer.append(audio=chunk)
+        while (remaining := deadline - perf_counter()) > 0:
+            await asyncio.sleep(remaining)
     await connection.input_audio_buffer.commit()
     event = await wait_for(connection, "conversation.item.input_audio_transcription.completed")
     transcript = (event.get("transcript") or "").strip()

@@ -303,6 +303,55 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             await sample.ask(conn, PCM)
         conn.response.create.assert_not_awaited()
 
+    async def test_audio_is_paced_including_partial_chunk_and_before_commit(self):
+        pcm = bytes(sample.CHUNK_BYTES * 2 + sample.CHUNK_BYTES // 2)
+        for send_delay, early_wakeup in ((0.0, False), (0.03, False), (0.2, False), (0.0, True)):
+            with self.subTest(send_delay=send_delay, early_wakeup=early_wakeup):
+                conn = connection()
+                conn.recv.side_effect = [
+                    {"type": "conversation.item.input_audio_transcription.completed", "transcript": "heard"},
+                    {"type": "response.output_audio.delta", "delta": PCM},
+                    {"type": "response.output_audio_transcript.done", "transcript": "spoken"},
+                    completed_response("spoken"),
+                ]
+                now = 0.0
+                sends = []
+                committed_at = []
+
+                async def append(*, audio):
+                    nonlocal now
+                    sends.append((now, audio))
+                    now += send_delay
+
+                async def sleep(delay):
+                    nonlocal now
+                    self.assertGreater(delay, 0)
+                    now += min(delay, 0.04) if early_wakeup else delay
+
+                async def commit():
+                    committed_at.append(now)
+
+                conn.input_audio_buffer.append.side_effect = append
+                conn.input_audio_buffer.commit.side_effect = commit
+                with (
+                    patch.object(sample, "perf_counter", side_effect=lambda: now),
+                    patch.object(sample.asyncio, "sleep", side_effect=sleep),
+                ):
+                    self.assertEqual(await sample.ask(conn, pcm), ("heard", "spoken", PCM))
+                self.assertEqual(b"".join(audio for _, audio in sends), pcm)
+                interval = max(0.1, send_delay)
+                for index, (sent_at, _) in enumerate(sends):
+                    self.assertAlmostEqual(sent_at, index * interval)
+                self.assertAlmostEqual(committed_at[0], interval * 2 + max(0.05, send_delay))
+
+    async def test_audio_send_failure_does_not_commit_partial_input(self):
+        conn = connection()
+        conn.input_audio_buffer.append.side_effect = RuntimeError("send failed")
+        with self.assertRaisesRegex(RuntimeError, "send failed"):
+            await sample.ask(conn, PCM)
+        conn.input_audio_buffer.commit.assert_not_awaited()
+        conn.response.create.assert_not_awaited()
+
     async def test_transcript_without_audio_is_not_a_voice_success(self):
         conn = connection()
         conn.recv.side_effect = [
