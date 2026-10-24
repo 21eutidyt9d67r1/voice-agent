@@ -101,8 +101,10 @@ def build_requests(args: argparse.Namespace) -> dict[str, Any]:
     if not re.fullmatch(r"[1-9][0-9]*", agent_version):
         raise ValueError("FOUNDRY_AGENT_VERSION must pin a positive integer version.")
     simulator_model = required_env("AZURE_AI_SIMULATOR_MODEL")
-    if not re.fullmatch(r"[^/\s<>]+/[^/\s<>]+", simulator_model):
-        raise ValueError("AZURE_AI_SIMULATOR_MODEL must be connectionName/deploymentName.")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)?", simulator_model):
+        raise ValueError(
+            "AZURE_AI_SIMULATOR_MODEL must be a deployment name or connectionName/deploymentName."
+        )
     judge_model = required_env("AZURE_AI_MODEL_DEPLOYMENT_NAME")
     model_configuration: dict[str, Any] = {"model": simulator_model}
     if args.voice_name:
@@ -205,7 +207,7 @@ def collect_results(
         or (expected_conversations is not None and counts.total != expected_conversations)
     ):
         raise RuntimeError("The completed run has missing output or evaluation errors; inspect artifacts.")
-    if any(item.get("status") != "pass" for item in items):
+    if any(item.get("status") not in {"pass", "completed"} for item in items):
         raise RuntimeError("One or more output items did not pass; inspect output_items.json.")
     for item in items:
         results = {result["name"]: result for result in item.get("results", [])}
