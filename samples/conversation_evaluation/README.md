@@ -119,6 +119,16 @@ Listen to the returned `turn-*-agent.wav` files with an audio player. The
 headless runner receives, validates, and saves actual agent PCM audio; it does
 not play through local speakers automatically.
 
+After each complete reply is saved, the runner waits for its **full audio
+duration** before uploading the next query. This is a headless playback
+simulation: a 20-second reply adds a 20-second wait, even if the service
+generated it faster. Receive/generation time is not subtracted. The final
+reply is also allowed its full duration before the session closes. A
+high-resolution clock is rechecked after early timer wakeups. The receipt
+records `output_audio_seconds` and `headless_playback_wait_seconds` for every
+turn. This wait is additional to real-time input pacing and does not establish
+that anybody listened to the audio.
+
 The receipt is saved before the intended-versus-observed check, so mismatches
 remain inspectable. Service failures still raise rather than generating a
 success-shaped receipt.

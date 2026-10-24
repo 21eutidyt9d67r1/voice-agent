@@ -216,6 +216,37 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(conn.response.create.await_count, 1)
                 conn.conversation.item.create.assert_not_awaited()
 
+    async def test_every_next_query_and_session_end_wait_for_full_reply_duration(self):
+        conn = connection()
+        events = list(conn.recv.side_effect)
+        output_sizes = (4800, 12000, 2400)
+        for index, size in enumerate(output_sizes):
+            events[3 + index * 4]["delta"] = bytes(size)
+        conn.recv.side_effect = events
+        now = 0.0
+        input_started = []
+
+        async def append(*, audio):
+            input_started.append(now)
+
+        async def sleep(delay):
+            nonlocal now
+            now += min(delay, 0.03)
+
+        conn.input_audio_buffer.append.side_effect = append
+        with (
+            patch.object(sample, "perf_counter", side_effect=lambda: now),
+            patch.object(sample.asyncio, "sleep", side_effect=sleep),
+            redirect_stdout(io.StringIO()),
+        ):
+            conversation = await self.converse(conn)
+        for actual, expected in zip(input_started, (0.0, 0.2, 0.55)):
+            self.assertAlmostEqual(actual, expected)
+        self.assertAlmostEqual(now, 0.7)
+        for turn, expected in zip(conversation["audio_turns"], (0.1, 0.25, 0.05)):
+            self.assertAlmostEqual(turn["output_audio_seconds"], expected)
+            self.assertAlmostEqual(turn["headless_playback_wait_seconds"], expected)
+
     async def test_rejects_automatic_responses_and_missing_acknowledgment(self):
         for audio_input in ({}, {"turn_detection": {"type": "server_vad"}}):
             conn = connection()

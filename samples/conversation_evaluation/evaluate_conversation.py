@@ -191,6 +191,11 @@ def input_file(audio_dir: Path, scenario: Scenario, index: int) -> Path:
     return audio_dir / f"{category}-{index + 1}.wav"
 
 
+async def wait_until(deadline: float) -> None:
+    while (remaining := deadline - perf_counter()) > 0:
+        await asyncio.sleep(remaining)
+
+
 async def ask(
     connection: AsyncBetaRealtimeConnection, pcm: bytes, fault: str | None = None,
 ) -> tuple[str, str, bytes]:
@@ -198,8 +203,7 @@ async def ask(
         chunk = pcm[offset:offset + CHUNK_BYTES]
         deadline = perf_counter() + len(chunk) / (SAMPLE_RATE * SAMPLE_WIDTH)
         await connection.input_audio_buffer.append(audio=chunk)
-        while (remaining := deadline - perf_counter()) > 0:
-            await asyncio.sleep(remaining)
+        await wait_until(deadline)
     await connection.input_audio_buffer.commit()
     event = await wait_for(connection, "conversation.item.input_audio_transcription.completed")
     transcript = (event.get("transcript") or "").strip()
@@ -292,11 +296,18 @@ async def converse(
         transcript, answer, audio = await asyncio.wait_for(ask(connection, pcm, fault), TURN_TIMEOUT)
         destination = output_dir / scenario.name / f"turn-{index + 1}-agent.wav"
         write_wav(destination, audio)
+        audio_seconds = len(audio) / (SAMPLE_RATE * SAMPLE_WIDTH)
+        playback_started = perf_counter()
+        print(f"Headless playback wait: {scenario.name}, turn {index + 1}, {audio_seconds:.3f}s")
+        await wait_until(playback_started + audio_seconds)
+        playback_wait_seconds = perf_counter() - playback_started
         audio_turns.append({
             "input_file": str(source.resolve()),
             "output_file": str(destination.resolve()),
             "input_pcm_bytes": len(pcm),
             "output_pcm_bytes": len(audio),
+            "output_audio_seconds": audio_seconds,
+            "headless_playback_wait_seconds": playback_wait_seconds,
             "fault_instructions_acknowledged": fault is not None,
         })
         messages.extend([
