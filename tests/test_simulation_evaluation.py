@@ -166,12 +166,19 @@ class SimulationTests(unittest.TestCase):
         for name, value in (
             ("FOUNDRY_AGENT_VERSION", "latest"),
             ("FOUNDRY_AGENT_NAME", "../agent"),
-            ("AZURE_AI_SIMULATOR_MODEL", "deployment-only"),
+            ("AZURE_AI_SIMULATOR_MODEL", "connection/too/many/parts"),
             ("AZURE_AI_SIMULATOR_MODEL", "connection/<deployment>"),
         ):
             with self.subTest(name=name), patch.dict(os.environ, {name: value}):
                 with self.assertRaises(ValueError):
                     self.plan()
+
+    def test_existing_project_deployment_can_be_simulator(self):
+        with patch.dict(os.environ, {"AZURE_AI_SIMULATOR_MODEL": "gpt-5-mini"}):
+            plan = self.plan()
+        self.assertEqual(
+            plan["run"]["data_source"]["model_configuration"]["model"], "gpt-5-mini"
+        )
 
     def test_rejects_nonfinite_timeouts_and_unbounded_turns(self):
         for args in (
@@ -272,6 +279,14 @@ class SimulationTests(unittest.TestCase):
         self.collect()
         self.assertEqual(json.loads((self.output / "output_items.json").read_text()), [output_item(1), output_item(2)])
         self.assertEqual(json.loads((self.output / "run.json").read_text())["output_datasets"], run_payload()["output_datasets"])
+
+    def test_cloud_completed_item_status_requires_passing_judges(self):
+        item = output_item(1)
+        item["status"] = "completed"
+        self.collect(payload=run_payload(total=1), items=[item], expected=1)
+        item["results"][0]["passed"] = False
+        with self.assertRaisesRegex(RuntimeError, "scores"):
+            self.collect(payload=run_payload(total=1), items=[item], expected=1)
 
     def test_paginates_all_output_items(self):
         def handler(request):

@@ -22,7 +22,8 @@ evaluation of an existing saved transcript.
   region and target runtime. An SDK accepting the request does **not** establish
   service availability for every project or Voice Agent model.
 - An existing **test** agent and an exact version, an existing simulator deployment
-  referenced as `connectionName/deploymentName`, and an existing judge deployment
+  referenced by its project deployment name or `connectionName/deploymentName`
+  for an admin-connected model, and an existing judge deployment
   supported by the `task_completion` and `coherence` evaluators. The model router
   is not a simulator or judge model. No resource, model deployment, agent, role,
   or permission is created by this sample.
@@ -38,6 +39,10 @@ voice simulation works for your project. Both modes score conversation **text**
 with `builtin.task_completion` and `builtin.coherence`. Neither measures speech
 recognition accuracy, pronunciation, audio quality, latency, interruptions, or
 avatar synchronization. There is no fabricated text-to-voice runtime adapter.
+In the live project checked below, a Voice Agent target **requires**
+`--voice-name`: text-only submission was rejected with
+`Voice-agent targets require voice_model.` Use text mode only for a target that
+supports it, not as a text-only adapter for a Voice Agent.
 
 ## Configure and inspect without calling Azure
 
@@ -50,7 +55,7 @@ python -m venv .venv
 $env:AZURE_AI_PROJECT_ENDPOINT = "https://<account>.services.ai.azure.com/api/projects/<project>"
 $env:FOUNDRY_AGENT_NAME = "<existing-test-agent>"
 $env:FOUNDRY_AGENT_VERSION = "1"
-$env:AZURE_AI_SIMULATOR_MODEL = "<connection-name>/<simulator-deployment>"
+$env:AZURE_AI_SIMULATOR_MODEL = "<existing-simulator-deployment>"
 $env:AZURE_AI_MODEL_DEPLOYMENT_NAME = "<judge-deployment>"
 
 .\.venv\Scripts\python.exe samples\simulation_evaluation\simulate.py plan
@@ -74,7 +79,7 @@ After confirming access, target safety, model availability, and cost:
 
 ```powershell
 .\.venv\Scripts\python.exe samples\simulation_evaluation\simulate.py submit
-# Optional cloud voice simulation, only with a supported test target:
+# Required for the Voice Agent target verified below:
 # .\.venv\Scripts\python.exe samples\simulation_evaluation\simulate.py submit --voice-name en-US-AvaMultilingualNeural
 ```
 
@@ -123,7 +128,7 @@ and apply your project's storage, retention, and cleanup policy. See
 [polling, cancellation, and error guidance](https://learn.microsoft.com/azure/foundry/observability/how-to/cloud-evaluation-results).
 Do not commit generated conversations, raw results, or credentials.
 
-## Offline regression checks and evidence boundary
+## Offline regression checks and live evidence
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_simulation_evaluation.py -v
@@ -135,6 +140,37 @@ goal-based input, isolated repetitions, voice configuration, configuration
 validation, budgets, pagination, partial/missing scores, evaluation failures,
 timeout/resumption, creation failures, and artifact preservation.
 
-These checks do **not** generate real conversations, call a simulator/judge,
-establish Voice Agent target support in a live project, or demonstrate a cloud
-pass rate. No live simulation/evaluation result is bundled with this sample.
+These offline checks do **not** generate real conversations or call a
+simulator/judge.
+
+### Live smoke check, October 24, 2026
+
+A separate real cloud run reused a tool-free Voice Agent version 1 in the
+`voice-live-monitor` France Central project, with existing `gpt-5-mini` simulator
+and judge deployments and `en-US-AvaMultilingualNeural` for the simulated caller.
+No agents, deployments, connections, roles, or permissions were created or
+changed. One fictional return-policy goal was used instead of the default
+appointment goals to match the existing test agent's instructions. The maximum
+was three turns and one repetition; the simulator ended after two user/assistant
+exchanges.
+
+| Live result | Observed value |
+| --- | --- |
+| Generated conversations | 1 |
+| Run status | `completed` |
+| Passed / failed / errored | 1 / 0 / 0 |
+| Task completion | 1.0, pass |
+| Coherence | 5.0, pass |
+| Persisted artifacts | Generated conversation dataset reference and WAV asset reference returned by the service |
+
+The initial text-only attempt failed before generation with
+`Voice-agent targets require voice_model.` Repeating with the documented voice
+setting completed. The run also established that the service accepts a bare
+project deployment name for the simulator and returns output-item status
+`completed`; passing evaluator scores are checked separately. Regression coverage
+includes these observed contracts.
+
+This is a single smoke check, not a customer benchmark or a measured audio-quality
+result. The service returned a WAV reference; playback/audio quality was not
+manually assessed. Raw conversations and judge prompts remain in the authorized
+project/local ignored artifacts, not in this repository.
