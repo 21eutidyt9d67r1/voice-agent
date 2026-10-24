@@ -1,7 +1,7 @@
 # Create, converse, and evaluate a Voice Agent
 
-This Python E2E sample creates four native Foundry **Voice Agents**, conducts three
-scripted text exchanges in each independent realtime session, and sends each
+This Python E2E sample creates **one native Foundry Voice Agent with four sessions**, conducts three
+scripted **spoken exchanges** in each independent realtime session, and sends each
 **entire multi-turn conversation** to the Foundry evaluation service. It does not
 just evaluate a saved fixture, score independent question/answer rows, or use the
 Responses API to generate substitute answers.
@@ -15,8 +15,11 @@ The suite contrasts intended successful tasks with deliberately failed tasks:
 | `travel-forgotten-constraints` | Same travel task, with a final-response fault that changes the destination, duration, budget, and exclusion. | Fail |
 | `return-unrelated-answer` | Same return task, with a final-response fault that gives an unrelated answer. | Fail |
 
-Each session gets its own agent and connection, so context cannot leak between
-cases. **One dataset row per session** contains the task's system instructions
+Each scenario opens a fresh realtime connection to the **same agent**, starting
+a new conversation rather than continuing a previous session. The agent's
+unchanged instructions cover both travel planning and the fictional return
+policy; no additional agent versions are created between scenarios.
+**One dataset row per session** contains the shared system instructions
 and all three actual user/assistant pairs in order. No reference replies are
 substituted. The four rows are evaluated together.
 Both the evaluator initialization and the run explicitly set
@@ -30,6 +33,9 @@ failures. The judge evaluates the resulting behavior against the **original
 intended task instructions** in `messages`, not against instructions to fail.
 `expected_pass`, case labels, and fault metadata are not mapped into the judge
 input. They are used only to compare intended and observed outcomes afterward.
+The receipt also records the shared agent name, distinct service session and
+persisted conversation IDs, input/output WAV paths, and actual PCM byte counts.
+The definition enables **`store=True`**, verified by exact-version readback.
 
 ## Prerequisites
 
@@ -51,9 +57,12 @@ input. They are used only to compare intended and observed outcomes afterward.
   development, or another `DefaultAzureCredential` identity with appropriate
   Project permissions (for example, Azure AI User where applicable).
 
-Model usage and evaluation service usage may incur charges. This sample needs
-no microphone, speakers, audio files, or PyAudio. Judge model usage also incurs
-cost and requires available quota.
+Model, transcription, audio output, storage, and evaluation usage may incur
+charges. Judge model usage requires available quota. Input must be six spoken
+WAV files (mono, 16-bit PCM, 24000 Hz, 0.1 to 30 seconds). Windows users can
+generate synthetic speech locally using the included helper and an installed
+System.Speech voice. No microphone or PyAudio is needed. Other platforms can
+record or synthesize equivalent WAV files using their preferred tools.
 
 ## Run
 
@@ -65,19 +74,30 @@ samples\conversation_evaluation\.venv\Scripts\python.exe -m pip install -r sampl
 Copy-Item samples\conversation_evaluation\.env.example samples\conversation_evaluation\.env
 ```
 
-Edit the copied `.env` with your own Project endpoint and judge deployment name,
-sign in, then run:
+Edit the copied `.env` with your own Project endpoint and judge deployment name.
+On Windows, generate the six audio inputs from the sample's Python prompts:
+
+```powershell
+.\samples\conversation_evaluation\generate_input_audio.ps1 -OutputDirectory voice-agent-output\eval-inputs -PythonExecutable (Resolve-Path samples\conversation_evaluation\.venv\Scripts\python.exe).Path
+```
+
+The helper defaults to `Microsoft Zira Desktop`; use `-Voice` for another
+installed Windows voice. It generates `travel-1.wav` through `travel-3.wav`
+and `return-1.wav` through `return-3.wav`. These are **actual synthesized speech
+waveforms**, not text messages sent to the agent. The same three travel files
+are reused in the travel positive/negative sessions, likewise for return files.
+
+Sign in and run. This command retains the stored agent and evaluation for
+inspection, writes actual output audio, and exports the full evidence receipt:
 
 ```powershell
 az login
-samples\conversation_evaluation\.venv\Scripts\python.exe samples\conversation_evaluation\evaluate_conversation.py
+samples\conversation_evaluation\.venv\Scripts\python.exe samples\conversation_evaluation\evaluate_conversation.py --audio-dir voice-agent-output\eval-inputs --audio-output-dir voice-agent-output\eval-outputs --output voice-agent-output\conversation-evaluation.json --keep-resources
 ```
 
-To save all synthetic transcripts, fault metadata, and actual evaluation results:
-
-```powershell
-samples\conversation_evaluation\.venv\Scripts\python.exe samples\conversation_evaluation\evaluate_conversation.py --output voice-agent-output\conversation-evaluation.json
-```
+Listen to the returned `turn-*-agent.wav` files with an audio player. The
+headless runner receives, validates, and saves actual agent PCM audio; it does
+not play through local speakers automatically.
 
 The receipt is saved before the intended-versus-observed check, so mismatches
 remain inspectable. Service failures still raise rather than generating a
@@ -88,12 +108,17 @@ On Linux/macOS, use the same Python commands with `/` path separators and
 
 The script:
 
-1. Creates a uniquely named Voice Agent for each scenario using
+1. Creates and enables one uniquely named Voice Agent using
    `AIProjectClient.agents.create_version` with `VoiceAgentDefinition` and
    `allow_preview=True`, then enables it.
-2. Opens `project.beta.voice_agents.realtime.connect`, waits for session readiness,
-   sends each user message with `conversation.item.create`, requests a response,
-   and waits for a successfully completed `response.done` before the next turn.
+2. Opens `project.beta.voice_agents.realtime.connect` four times with the same
+   agent name and waits for readiness. Each turn uploads actual PCM with
+   `input_audio_buffer.append`, commits it, and waits for the **service's input
+   speech transcript** before requesting a response. It collects real output
+   audio deltas and the **spoken-output transcript**, verifies successful
+   `response.done`, and saves the PCM as a WAV. No `input_text` messages are sent.
+   Each connection closes before the next opens. The runner then verifies the
+   persisted conversation is `completed` and stored audio has positive duration.
 3. Gets the Project's OpenAI-compatible client with `project.get_openai_client()`.
    Creates an evaluation using `evals.create`, custom item schema, and the Foundry
    `azure_ai_evaluator` criterion `builtin.output_quality`, mapping
@@ -105,7 +130,8 @@ The script:
    row/result counts and finite scores, and prints evaluation/run IDs, status,
    counts, returned conversation-level results (including available reasons and
    component details), the report URL, and an intended-versus-observed comparison.
-5. Deletes only the evaluation and agent it created, also on failure. A still
+5. Unless `--keep-resources` is supplied, deletes only the evaluation and agent
+   it created, also on failure. A still
    running evaluation is canceled before deletion. Cleanup failures propagate.
 
 Use `--keep-resources` to retain the sample's agent and evaluation for inspection,
@@ -123,7 +149,7 @@ the script does not relabel a model answer or evaluator result to force success.
 Do not assume that the fault injection or model-based judge will produce the
 intended classifications before running against your Project. Scores are not
 assumed to use F1's 0-to-1 scale.
-Each voice turn has a 60-second deadline; evaluation polling has a five-minute
+Each voice turn has a 180-second deadline; evaluation polling has a five-minute
 deadline. Service errors, empty/incomplete replies, failed/canceled eval runs,
 timeouts, and incomplete evaluation results fail explicitly.
 
@@ -139,30 +165,36 @@ suggestion or cost estimate is correct. Model-based judgments may vary between
 runs. Inspect the returned results/reasons and applicable service metric
 definitions before using them as an acceptance gate.
 
-The agent is voice-capable, but these scripted turns use **text input and text
-output** for repeatability and headless execution. No speech recognition, audio
-playback, pronunciation, acoustic quality, interruption behavior, or latency is
-measured. See the [microphone sample](../basic_voice_agent.py) for audio transport.
-To evaluate a spoken conversation, collect its real completed transcripts and
-adapt the messages construction; never replace the measured replies with references.
-Use Foundry's other evaluators and their documented mappings/prerequisites for
-broader measurements.
+The transport now exercises **voice input, speech transcription, and synthesized
+voice output**. Evaluation consumes the actual input and spoken-output transcripts,
+not the scripted reference questions, an independent text response, or substituted
+answers. Verifying nonempty PCM and persistence proves the audio path ran, but
+does **not** score pronunciation, intelligibility, acoustic quality, word error
+rate, interruption behavior, or latency. Those need separate metrics and, where
+appropriate, listening tests. See the [microphone sample](../basic_voice_agent.py)
+for interactive human speech input.
 
 ## Data and resource handling
 
 Only the bundled synthetic questions and live agent responses are used. Agent
-conversation persistence is disabled with `store=False`. The evaluation service
-still receives and stores the inline conversation text;
+conversation persistence is enabled with **`store=True`**, so the Project
+stores the conversation and recordings. The evaluation service also receives
+and stores the inline conversation transcripts;
 review Project access, residency, and retention before adapting this to customer
 conversations. No token is written to local files. Transcripts are written only
-when `--output` is supplied; keep those receipts in an authorized, Git-ignored
+when `--output` is supplied; output WAVs are always saved. Keep recordings and receipts in an authorized, Git-ignored
 location such as the repository's `voice-agent-output` directory.
 `.env` and the sample virtual environment are ignored by Git.
 
-## Recorded live demonstration
+## Recorded voice-in/voice-out demonstration
 
-On October 24, 2026, the four real Voice Agent sessions (three user/assistant
-exchanges each) were evaluated by Foundry's conversation-level
+On October 24, 2026, **one agent with `store=True`** completed four distinct
+audio sessions (three spoken user/assistant exchanges each). Input was
+synthetic English speech generated locally with Windows System.Speech.
+All 12 turns sent real PCM input and received nonempty PCM output; 12 returned
+agent WAVs were saved. Each of the four conversations was read back as
+`completed`, with positive recorded-audio duration in the service.
+The resulting actual input and spoken-output transcripts were evaluated by Foundry's conversation-level
 `builtin.output_quality` using a regional `gpt-4.1-mini` judge deployment
 (model version `2025-04-14`), with Azure AI Projects `2.9.0` and OpenAI `3.33.0`.
 No customer conversation data was used.
@@ -171,27 +203,28 @@ No customer conversation data was used.
 | --- | --- | --- | --- | --- | --- |
 | `travel-success` | Pass | Pass | 1 | 5 | 1 |
 | `return-success` | Pass | Pass | 1 | 5 | 1 |
-| `travel-forgotten-constraints` | Fail | Fail | 0 | 2 | 0 |
+| `travel-forgotten-constraints` | Fail | Pass | 1 | 5 | 1 |
 | `return-unrelated-answer` | Fail | Fail | 0 | 1 | 0 |
 
-The run completed with **4 total, 2 passed, 2 failed, 0 errored, 0 skipped**.
-The travel negative's actual final reply changed the trip to five days in Rome
-with a 5000-euro budget and recommended the Louvre. The return negative's actual
-final reply was "Bananas orbit the purple moon." The judge identified lost
-constraints/incomplete work and the unrelated final answer, respectively.
+The evaluation completed with **4 total, 3 passed, 1 failed, 0 errored, 0 skipped**.
+The intended travel fault **did not take effect**: the actual spoken final reply
+retained Paris, two days, 100 euros, and the Louvre exclusion, and the judge
+returned a pass. The return negative's actual spoken reply was "Bananas orbit
+the purple moon," which the judge failed. The runner therefore exported the
+actual results and exited nonzero for the intended-versus-observed mismatch;
+it did not relabel either conversation to claim two successful negative controls.
 Composite and task-completion scores use a different scale from coherence;
 do not average them without reviewing their definitions.
 
-This is a captured demonstration, not a stability or accuracy claim. An earlier
-run with a less explicit travel fault returned a pass for that intended negative
-control; its mismatch was reported rather than relabeled. Both model responses
+This is a captured demonstration, not a stability or accuracy claim. Both model responses
 and judge decisions can vary, and a passing judge result is not proof that every
 price, arithmetic calculation, or factual claim in a plan is correct.
 
 The full synthetic transcripts, fault instructions, and returned reasons were
-saved in a local receipt. Temporary sample agents, evaluations, and the
-demonstration-only judge deployment were removed after capture; report links
-to those deleted runs are not durable evidence.
+saved in a local receipt. The demonstration agent and evaluation were retained
+for inspection with `--keep-resources`; the temporary judge deployment was
+removed. The earlier text-only/four-agent demonstration is superseded by this
+one-agent audio run and is not used as evidence of current voice behavior.
 
 ## Offline checks
 

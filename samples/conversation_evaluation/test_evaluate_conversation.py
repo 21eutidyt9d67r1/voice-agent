@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import io
 import json
 import tempfile
 import unittest
+import wave
 from contextlib import redirect_stdout
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,6 +21,7 @@ from openai.types.evals.runs.output_item_list_response import Result
 import evaluate_conversation as sample
 
 ANSWERS = ("Initial itinerary.", "Revised itinerary without the Louvre.", "Final plan and constraints.")
+PCM = bytes(4800)
 
 
 def completed_response(text: str) -> dict:
@@ -34,19 +38,28 @@ def completed_response(text: str) -> dict:
 
 
 def connection() -> SimpleNamespace:
+    turns = []
+    for question, answer in zip(sample.QUESTIONS, ANSWERS):
+        turns.extend([
+            {"type": "conversation.item.input_audio_transcription.completed", "transcript": question},
+            {"type": "response.output_audio.delta", "delta": PCM},
+            {"type": "response.output_audio_transcript.done", "transcript": answer},
+            completed_response(answer),
+        ])
     return SimpleNamespace(
         recv=AsyncMock(side_effect=[
-            {"type": "session.created"},
+            {"type": "session.created", "conversation_id": "conversation-test"},
             {
                 "type": "session.updated",
                 "session": {
+                    "id": "session-test",
                     "audio": {"input": {"turn_detection": None}},
-                    "output_modalities": ["text"],
+                    "output_modalities": ["text", "audio"],
                 },
             },
-            {"type": "response.output_text.delta", "delta": "not a final answer"},
-            *[completed_response(text) for text in ANSWERS],
+            *turns,
         ]),
+        input_audio_buffer=SimpleNamespace(append=AsyncMock(), commit=AsyncMock()),
         conversation=SimpleNamespace(item=SimpleNamespace(create=AsyncMock())),
         response=SimpleNamespace(create=AsyncMock()),
     )
@@ -106,7 +119,10 @@ def evaluation_client() -> tuple[MagicMock, SimpleNamespace]:
     return project, client
 
 
-CONVERSATION = {"messages": [
+CONVERSATION = {
+    "session_id": "session-test", "conversation_id": "conversation-test",
+    "audio_turns": [],
+    "messages": [
     {"role": "system", "content": [{"type": "text", "text": sample.INSTRUCTIONS}]},
     *[
         message
@@ -119,6 +135,7 @@ CONVERSATION = {"messages": [
 ]}
 CASE = {
     **CONVERSATION,
+    "agent_name": "agent-test",
     "scenario_id": "test-session",
     "expected_pass": True,
     "failure_injection": None,
@@ -126,33 +143,49 @@ CASE = {
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
-    def test_definition_is_native_voice_manual_text_without_persistence(self):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        for category in ("travel", "return"):
+            for index in range(1, 4):
+                sample.write_wav(self.root / f"{category}-{index}.wav", PCM)
+
+    async def converse(self, conn, scenario=sample.SCENARIOS[0]):
+        return await sample.converse(
+            conn, scenario, audio_dir=self.root, output_dir=self.root / "output",
+        )
+
+    def test_definition_is_native_voice_audio_with_persistence(self):
         definition = sample.definition("gpt-realtime").as_dict()
         self.assertEqual(definition["kind"], "voice")
         self.assertEqual(definition["model"], "gpt-realtime")
         self.assertIsNone(definition["audio"]["input"]["turn_detection"])
-        self.assertEqual(definition["output_modalities"], ["text"])
-        self.assertFalse(definition["store"])
+        self.assertEqual(definition["output_modalities"], ["text", "audio"])
+        self.assertTrue(definition["store"])
+        self.assertEqual(
+            definition["audio"]["input"]["transcription"],
+            {"model": "whisper-1", "language": "en-US"},
+        )
 
     async def test_three_turns_wait_for_final_replies_and_preserve_all_messages(self):
         conn = connection()
 
         async def create_response():
-            expected_receives = (2, 4, 5)[conn.response.create.await_count - 1]
+            expected_receives = (3, 7, 11)[conn.response.create.await_count - 1]
             self.assertEqual(conn.recv.await_count, expected_receives)
+            self.assertEqual(conn.input_audio_buffer.commit.await_count, conn.response.create.await_count)
 
         conn.response.create.side_effect = create_response
-        conversation = await sample.converse(conn)
-        self.assertEqual(conversation, CONVERSATION)
+        conversation = await self.converse(conn)
+        self.assertEqual(conversation["messages"], CONVERSATION["messages"])
+        self.assertEqual(conversation["conversation_id"], "conversation-test")
         self.assertEqual(len(conversation["messages"]), 7)
-        messages = conn.conversation.item.create.await_args_list
-        self.assertEqual(len(messages), 3)
-        self.assertEqual(messages[1].kwargs["item"]["content"], [
-            {"type": "input_text", "text": sample.QUESTIONS[1]},
-        ])
-        self.assertNotEqual(
-            messages[0].kwargs["item"]["id"], messages[1].kwargs["item"]["id"],
-        )
+        conn.conversation.item.create.assert_not_awaited()
+        self.assertEqual(conn.input_audio_buffer.append.await_count, 3)
+        self.assertEqual(len(conversation["audio_turns"]), 3)
+        for turn in conversation["audio_turns"]:
+            self.assertEqual(sample.read_wav(Path(turn["output_file"])), PCM)
 
     async def test_failures_never_create_evaluation_rows(self):
         for event in (
@@ -165,28 +198,37 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
                 ready = {
                     "type": "session.updated",
                     "session": {
+                        "id": "session-test",
                         "audio": {"input": {"turn_detection": None}},
-                        "output_modalities": ["text"],
+                        "output_modalities": ["text", "audio"],
                     },
                 }
-                conn.recv.side_effect = [ready, event]
+                conn.recv.side_effect = [
+                    {"type": "session.created", "conversation_id": "conversation-test"},
+                    ready,
+                    {"type": "conversation.item.input_audio_transcription.completed", "transcript": "hello"},
+                    event,
+                ]
                 with self.assertRaises(RuntimeError):
-                    await sample.converse(conn)
+                    await self.converse(conn)
                 self.assertEqual(conn.response.create.await_count, 1)
-                self.assertEqual(conn.conversation.item.create.await_count, 1)
+                conn.conversation.item.create.assert_not_awaited()
 
     async def test_rejects_automatic_responses_and_missing_acknowledgment(self):
         for audio_input in ({}, {"turn_detection": {"type": "server_vad"}}):
             conn = connection()
-            conn.recv.side_effect = [{
+            conn.recv.side_effect = [
+                {"type": "session.created", "conversation_id": "conversation-test"},
+                {
                 "type": "session.updated",
                 "session": {
+                    "id": "session-test",
                     "audio": {"input": audio_input},
-                    "output_modalities": ["text"],
+                    "output_modalities": ["text", "audio"],
                 },
             }]
-            with self.assertRaisesRegex(RuntimeError, "manual text-only"):
-                await sample.converse(conn)
+            with self.assertRaisesRegex(RuntimeError, "manual audio"):
+                await self.converse(conn)
             conn.conversation.item.create.assert_not_awaited()
 
     async def test_silent_connection_times_out(self):
@@ -198,12 +240,12 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         conn.recv = stall
         with patch.object(sample, "TURN_TIMEOUT", 0.01):
             with self.assertRaises(TimeoutError):
-                await sample.converse(conn)
+                await self.converse(conn)
 
     async def test_negative_control_changes_only_final_response_request(self):
         conn = connection()
         scenario = sample.SCENARIOS[2]
-        conversation = await sample.converse(conn, scenario)
+        conversation = await self.converse(conn, scenario)
         requests = conn.response.create.await_args_list
         self.assertEqual(requests[0].kwargs, {})
         self.assertEqual(requests[1].kwargs, {})
@@ -211,9 +253,46 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             "response": {"instructions": scenario.final_turn_fault},
         })
         self.assertEqual(
-            conversation["messages"][0]["content"][0]["text"], scenario.instructions,
+            conversation["messages"][0]["content"][0]["text"], sample.INSTRUCTIONS,
         )
         self.assertEqual(conversation["messages"][-1]["content"][0]["text"], ANSWERS[-1])
+
+    async def test_no_transcript_never_requests_response(self):
+        conn = connection()
+        conn.recv.side_effect = [{
+            "type": "conversation.item.input_audio_transcription.completed", "transcript": "",
+        }]
+        with self.assertRaisesRegex(RuntimeError, "no transcript"):
+            await sample.ask(conn, PCM)
+        conn.response.create.assert_not_awaited()
+
+    async def test_transcript_without_audio_is_not_a_voice_success(self):
+        conn = connection()
+        conn.recv.side_effect = [
+            {"type": "conversation.item.input_audio_transcription.completed", "transcript": "heard"},
+            {"type": "response.output_audio_transcript.done", "transcript": "spoken"},
+            completed_response("spoken"),
+        ]
+        with self.assertRaisesRegex(RuntimeError, "actual PCM"):
+            await sample.ask(conn, PCM)
+
+    async def test_base64_audio_and_recognized_text_are_used_unchanged(self):
+        conn = connection()
+        conn.recv.side_effect = [
+            {"type": "conversation.item.input_audio_transcription.completed", "transcript": "recognized words"},
+            {"type": "response.output_audio.delta", "delta": base64.b64encode(PCM).decode()},
+            {"type": "response.output_audio_transcript.done", "transcript": "spoken words"},
+            completed_response("different text must not replace spoken transcript"),
+        ]
+        self.assertEqual(await sample.ask(conn, PCM), ("recognized words", "spoken words", PCM))
+
+    def test_rejects_wrong_wav_format(self):
+        path = self.root / "wrong.wav"
+        with wave.open(str(path), "wb") as recording:
+            recording.setparams((2, 2, 16000, 0, "NONE", "not compressed"))
+            recording.writeframes(PCM)
+        with self.assertRaises(ValueError):
+            sample.read_wav(path)
 
 
 class EvaluationTests(unittest.IsolatedAsyncioTestCase):
@@ -236,11 +315,18 @@ class EvaluationTests(unittest.IsolatedAsyncioTestCase):
             "type": "object",
             "properties": {
                 "messages": {"type": "array", "items": {"type": "object"}},
+                "agent_name": {"type": "string"},
+                "session_id": {"type": "string"},
+                "conversation_id": {"type": "string"},
+                "audio_turns": {"type": "array", "items": {"type": "object"}},
                 "scenario_id": {"type": "string"},
                 "expected_pass": {"type": "boolean"},
                 "failure_injection": {"type": ["string", "null"]},
             },
-            "required": ["messages", "scenario_id", "expected_pass", "failure_injection"],
+            "required": [
+                "messages", "agent_name", "session_id", "conversation_id", "audio_turns",
+                "scenario_id", "expected_pass", "failure_injection",
+            ],
         })
         run_request = client.evals.runs.create.await_args.kwargs
         self.assertTrue(run_request["name"].strip())
@@ -380,7 +466,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         for failing_phase in ("enable", "conversation", "evaluation", "threshold", None):
             with self.subTest(phase=failing_phase):
                 agents = SimpleNamespace(
-                    create_version=AsyncMock(),
+                    create_version=AsyncMock(return_value=SimpleNamespace(version="1")),
+                    get_version=AsyncMock(return_value=SimpleNamespace(definition={"store": True})),
                     enable=AsyncMock(),
                     delete=AsyncMock(),
                 )
@@ -409,21 +496,36 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(sample, "AIProjectClient", return_value=context(project)),
                     patch.object(sample, "converse", conversation),
                     patch.object(sample, "evaluate", evaluation),
+                    patch.object(sample, "read_wav", return_value=PCM),
+                    patch.object(sample, "verify_persistence", AsyncMock()),
                     redirect_stdout(io.StringIO()),
                 ):
                     if failing_phase:
                         with self.assertRaises(RuntimeError):
-                            await sample.run("https://example.invalid", "gpt-realtime", "judge")
+                            await sample.run(
+                                "https://example.invalid", "gpt-realtime", "judge", audio_dir=Path("input"),
+                            )
                     else:
-                        await sample.run("https://example.invalid", "gpt-realtime", "judge")
+                        await sample.run(
+                            "https://example.invalid", "gpt-realtime", "judge", audio_dir=Path("input"),
+                        )
                 name = agents.create_version.await_args.kwargs["agent_name"]
-                self.assertEqual(agents.delete.await_count, agents.create_version.await_count)
+                agents.create_version.assert_awaited_once()
+                agents.enable.assert_awaited_once_with(agent_name=name)
+                agents.delete.assert_awaited_once_with(agent_name=name)
                 self.assertEqual(agents.delete.await_args.kwargs["agent_name"], name)
                 if failing_phase in {"enable", "conversation"}:
                     evaluation.assert_not_awaited()
                 else:
                     cases = evaluation.await_args.args[1]
                     self.assertEqual(len(cases), 4)
+                    self.assertEqual({case["agent_name"] for case in cases}, {name})
+                    connections = project.beta.voice_agents.realtime.connect.call_args_list
+                    self.assertEqual(len(connections), 4)
+                    self.assertTrue(all(call.kwargs == {"agent_name": name} for call in connections))
+                    self.assertEqual(
+                        project.beta.voice_agents.realtime.connect.return_value.__aexit__.await_count, 4,
+                    )
                     self.assertEqual(
                         [case["expected_pass"] for case in cases], [True, True, False, False],
                     )
@@ -436,7 +538,9 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mismatched_outcomes_are_saved_before_failure(self):
         agents = SimpleNamespace(
-            create_version=AsyncMock(), enable=AsyncMock(), delete=AsyncMock(),
+            create_version=AsyncMock(return_value=SimpleNamespace(version="1")),
+            get_version=AsyncMock(return_value=SimpleNamespace(definition={"store": True})),
+            enable=AsyncMock(), delete=AsyncMock(),
         )
         project = SimpleNamespace(
             agents=agents,
@@ -460,12 +564,15 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch.object(sample, "AIProjectClient", return_value=context(project)),
             patch.object(sample, "converse", AsyncMock(return_value=CONVERSATION)),
             patch.object(sample, "evaluate", AsyncMock(return_value=summary)),
+            patch.object(sample, "read_wav", return_value=PCM),
+            patch.object(sample, "verify_persistence", AsyncMock()),
             redirect_stdout(io.StringIO()),
         ):
             output = Path(directory) / "nested" / "evidence.json"
             with self.assertRaisesRegex(RuntimeError, "did not match"):
                 await sample.run(
                     "https://example.invalid", "gpt-realtime", "judge", output=output,
+                    audio_dir=Path("input"),
                 )
             evidence = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(evidence["evaluation"], summary)
@@ -474,7 +581,34 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                 evidence["conversations"][2]["failure_injection"],
                 sample.SCENARIOS[2].final_turn_fault,
             )
-        self.assertEqual(agents.delete.await_count, 4)
+        agents.delete.assert_awaited_once()
+
+
+class PersistenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_confirms_stored_audio_including_sdk_timedelta(self):
+        for duration in (1000, timedelta(seconds=1)):
+            with self.subTest(duration=duration):
+                conversations = SimpleNamespace(
+                    get=AsyncMock(return_value=SimpleNamespace(status="completed")),
+                    get_audio=AsyncMock(return_value=SimpleNamespace(duration_ms=duration)),
+                )
+                project = SimpleNamespace(beta=SimpleNamespace(
+                    voice_agents=SimpleNamespace(conversations=conversations),
+                ))
+                with redirect_stdout(io.StringIO()):
+                    await sample.verify_persistence(project, "agent", "conversation")
+                conversations.get.assert_awaited_once_with("agent", "conversation")
+                conversations.get_audio.assert_awaited_once_with("agent", "conversation")
+
+    async def test_empty_recording_is_rejected(self):
+        project = SimpleNamespace(beta=SimpleNamespace(voice_agents=SimpleNamespace(
+            conversations=SimpleNamespace(
+                get=AsyncMock(return_value=SimpleNamespace(status="completed")),
+                get_audio=AsyncMock(return_value=SimpleNamespace(duration_ms=timedelta())),
+            ),
+        )))
+        with self.assertRaisesRegex(RuntimeError, "no recorded audio"):
+            await sample.verify_persistence(project, "agent", "conversation")
 
 
 if __name__ == "__main__":
