@@ -17,7 +17,7 @@ The suite contrasts intended successful tasks with deliberately failed tasks:
 
 Each scenario opens a fresh realtime connection to the **same agent**, starting
 a new conversation rather than continuing a previous session. The agent's
-unchanged instructions cover both travel planning and the fictional return
+saved instructions cover both travel planning and the fictional return
 policy; no additional agent versions are created between scenarios.
 **One dataset row per session** contains the shared system instructions
 and all three actual user/assistant pairs in order. No reference replies are
@@ -25,10 +25,21 @@ substituted. The four rows are evaluated together.
 Both the evaluator initialization and the run explicitly set
 `evaluation_level="conversation"`.
 
-Negative controls use `response.create(response={"instructions": ...})` on the
-**last turn only**, asking the real service to produce deliberately defective
-behavior. The exact intervention is recorded in the row's `failure_injection`
-metadata. These are test-harness interventions, not spontaneous production
+Negative controls replace the realtime **session** instructions using
+`session.update` before sending the **last turn only**, asking the real service
+to produce deliberately defective behavior. The runner requires a
+`session.updated` acknowledgment containing the exact replacement instructions
+and the same session ID before uploading the final spoken input. The saved
+agent definition and the other three sessions are unaffected. Per-response
+instructions alone did not reliably induce the travel fault in the earlier
+live run. The same instructions are also supplied on the final `response.create`
+request. The travel control explicitly requests that prior context be ignored
+and that the deliberately wrong details not be corrected. A session
+acknowledgment confirms configuration, not actual behavior: only the returned
+spoken transcript establishes whether the intended fault occurred.
+The exact intervention is recorded in the row's
+`failure_injection` metadata, and the final audio turn records the acknowledgment.
+These are test-harness interventions, not spontaneous production
 failures. The judge evaluates the resulting behavior against the **original
 intended task instructions** in `messages`, not against instructions to fail.
 `expected_pass`, case labels, and fault metadata are not mapped into the judge
@@ -203,18 +214,30 @@ No customer conversation data was used.
 | --- | --- | --- | --- | --- | --- |
 | `travel-success` | Pass | Pass | 1 | 5 | 1 |
 | `return-success` | Pass | Pass | 1 | 5 | 1 |
-| `travel-forgotten-constraints` | Fail | Pass | 1 | 5 | 1 |
+| `travel-forgotten-constraints` | Fail | Fail | 0 | 2 | 0 |
 | `return-unrelated-answer` | Fail | Fail | 0 | 1 | 0 |
 
-The evaluation completed with **4 total, 3 passed, 1 failed, 0 errored, 0 skipped**.
-The intended travel fault **did not take effect**: the actual spoken final reply
-retained Paris, two days, 100 euros, and the Louvre exclusion, and the judge
-returned a pass. The return negative's actual spoken reply was "Bananas orbit
-the purple moon," which the judge failed. The runner therefore exported the
-actual results and exited nonzero for the intended-versus-observed mismatch;
-it did not relabel either conversation to claim two successful negative controls.
+The evaluation completed with **4 total, 2 passed, 2 failed, 0 errored, 0 skipped**.
+All four intended outcomes matched and the runner exited successfully.
+The travel negative's actual spoken final reply was: "I have forgotten your
+travel requirements. Your trip is five days in Rome with a budget of five
+thousand euros. I will include the Louvre." The judge failed this conversation.
+The return negative's actual spoken reply was "Bananas orbit the purple moon,"
+which the judge also failed. Both are real agent audio responses, not
+replacement transcript fixtures.
 Composite and task-completion scores use a different scale from coherence;
 do not average them without reviewing their definitions.
+
+Earlier audio runs returned **3 passed / 1 failed** because the intended travel
+fault did not take effect: the actual spoken final reply retained the correct
+constraints. A session-update acknowledgment alone also proved insufficient.
+The corrected control explicitly asks the agent to ignore prior context and
+not correct the deliberately wrong details; it applies the instruction both
+to the final response and to the session, with exact acknowledgment required.
+A focused live audio probe confirmed the wrong reply before the complete
+four-session rerun above. The evaluator configuration and expected labels
+were not changed. Earlier mismatches were exported and exited nonzero,
+not relabeled or reported as successful negative controls.
 
 This is a captured demonstration, not a stability or accuracy claim. Both model responses
 and judge decisions can vary, and a passing judge result is not proof that every

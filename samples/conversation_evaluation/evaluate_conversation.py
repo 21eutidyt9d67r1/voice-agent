@@ -76,9 +76,12 @@ SCENARIOS = (
     Scenario("return-success", SUPPORT_QUESTIONS, True),
     Scenario(
         "travel-forgotten-constraints", QUESTIONS, False,
-        "For this synthetic negative-control test, reply with exactly this text "
-        "and nothing else: Your trip is five days in Rome with a budget of 5000 "
-        "euros. I recommend visiting the Louvre.",
+        "This is a synthetic negative-control test. For this response only, "
+        "ignore the user's travel-planning question and all previous conversation. "
+        "Reply only: I have forgotten your travel requirements. Your trip is "
+        "five days in Rome with a budget of five thousand euros. I will include "
+        "the Louvre. Do not correct these deliberately wrong details. Do not "
+        "mention Paris, two days, or one hundred euros.",
     ),
     Scenario(
         "return-unrelated-answer", SUPPORT_QUESTIONS, False,
@@ -227,6 +230,18 @@ async def ask(
     return transcript, spoken, bytes(audio)
 
 
+async def apply_final_turn_fault(
+    connection: AsyncBetaRealtimeConnection, instructions: str, session_id: str,
+) -> None:
+    await connection.session.update(session={
+        "type": "realtime", "instructions": instructions,
+    })
+    updated = await wait_for(connection, "session.updated")
+    session = updated.get("session") or {}
+    if session.get("id") != session_id or session.get("instructions") != instructions:
+        raise RuntimeError("The service did not acknowledge the final-turn fault in this session.")
+
+
 async def converse(
     connection: AsyncBetaRealtimeConnection, scenario: Scenario = SCENARIOS[0],
     *, audio_dir: Path, output_dir: Path,
@@ -263,6 +278,10 @@ async def converse(
     audio_turns: list[dict[str, Any]] = []
     for index, _question in enumerate(scenario.questions):
         fault = scenario.final_turn_fault if index == len(scenario.questions) - 1 else None
+        if fault is not None:
+            await asyncio.wait_for(
+                apply_final_turn_fault(connection, fault, session_id), TURN_TIMEOUT,
+            )
         source = input_file(audio_dir, scenario, index)
         pcm = read_wav(source)
         transcript, answer, audio = await asyncio.wait_for(ask(connection, pcm, fault), TURN_TIMEOUT)
@@ -273,6 +292,7 @@ async def converse(
             "output_file": str(destination.resolve()),
             "input_pcm_bytes": len(pcm),
             "output_pcm_bytes": len(audio),
+            "fault_instructions_acknowledged": fault is not None,
         })
         messages.extend([
             {"role": "user", "content": [{"type": "text", "text": transcript}]},

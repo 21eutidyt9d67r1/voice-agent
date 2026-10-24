@@ -62,6 +62,7 @@ def connection() -> SimpleNamespace:
         input_audio_buffer=SimpleNamespace(append=AsyncMock(), commit=AsyncMock()),
         conversation=SimpleNamespace(item=SimpleNamespace(create=AsyncMock())),
         response=SimpleNamespace(create=AsyncMock()),
+        session=SimpleNamespace(update=AsyncMock()),
     )
 
 
@@ -183,6 +184,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(conversation["messages"]), 7)
         conn.conversation.item.create.assert_not_awaited()
         self.assertEqual(conn.input_audio_buffer.append.await_count, 3)
+        conn.session.update.assert_not_awaited()
         self.assertEqual(len(conversation["audio_turns"]), 3)
         for turn in conversation["audio_turns"]:
             self.assertEqual(sample.read_wav(Path(turn["output_file"])), PCM)
@@ -242,20 +244,55 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TimeoutError):
                 await self.converse(conn)
 
-    async def test_negative_control_changes_only_final_response_request(self):
+    async def test_negative_control_is_acknowledged_only_before_final_audio_turn(self):
         conn = connection()
         scenario = sample.SCENARIOS[2]
+        events = list(conn.recv.side_effect)
+        events.insert(10, {
+            "type": "session.updated",
+            "session": {"id": "session-test", "instructions": scenario.final_turn_fault},
+        })
+        conn.recv.side_effect = events
+
+        async def update_session(**_kwargs):
+            self.assertEqual(conn.response.create.await_count, 2)
+            self.assertEqual(conn.input_audio_buffer.commit.await_count, 2)
+
+        conn.session.update.side_effect = update_session
         conversation = await self.converse(conn, scenario)
-        requests = conn.response.create.await_args_list
-        self.assertEqual(requests[0].kwargs, {})
-        self.assertEqual(requests[1].kwargs, {})
-        self.assertEqual(requests[2].kwargs, {
-            "response": {"instructions": scenario.final_turn_fault},
+        self.assertEqual(
+            [request.kwargs for request in conn.response.create.await_args_list],
+            [{}, {}, {"response": {"instructions": scenario.final_turn_fault}}],
+        )
+        conn.session.update.assert_awaited_once_with(session={
+            "type": "realtime", "instructions": scenario.final_turn_fault,
         })
         self.assertEqual(
             conversation["messages"][0]["content"][0]["text"], sample.INSTRUCTIONS,
         )
         self.assertEqual(conversation["messages"][-1]["content"][0]["text"], ANSWERS[-1])
+        self.assertEqual(
+            [turn["fault_instructions_acknowledged"] for turn in conversation["audio_turns"]],
+            [False, False, True],
+        )
+
+    async def test_negative_control_requires_exact_acknowledgment_and_same_session(self):
+        for session in (
+            {"id": "session-test", "instructions": "unchanged instructions"},
+            {"id": "different-session", "instructions": sample.SCENARIOS[2].final_turn_fault},
+        ):
+            conn = connection()
+            conn.recv.side_effect = [{"type": "session.updated", "session": session}]
+            with self.assertRaisesRegex(RuntimeError, "acknowledge"):
+                await sample.apply_final_turn_fault(conn, sample.SCENARIOS[2].final_turn_fault, "session-test")
+            conn.response.create.assert_not_awaited()
+
+    async def test_negative_control_update_errors_are_not_ignored(self):
+        conn = connection()
+        conn.recv.side_effect = [{"type": "error", "error": {"code": "unsupported_update"}}]
+        with self.assertRaisesRegex(RuntimeError, "unsupported_update"):
+            await sample.apply_final_turn_fault(conn, sample.SCENARIOS[2].final_turn_fault, "session-test")
+        conn.response.create.assert_not_awaited()
 
     async def test_no_transcript_never_requests_response(self):
         conn = connection()
