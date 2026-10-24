@@ -238,7 +238,31 @@ These checks do **not** establish that credentials, Voice Agent/model availabili
 or the Foundry evaluation service work in a live Project. Run the command in
 [Run](#run) to verify the complete cloud path.
 
-## API references
+## Evaluation documentation followed
+
+The primary guide is Microsoft Learn's
+[Evaluate conversation datasets with the Microsoft Foundry SDK](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-conversations)
+(checked October 24, 2026). This sample applies its conversation-level workflow
+to transcripts captured from the actual voice sessions:
+
+| Implementation choice | Documentation |
+| --- | --- |
+| Evaluate the whole interaction, not just individual turns; explicitly set the run's `evaluation_level` to `conversation`. | [Choose an evaluation level](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-conversations#choose-an-evaluation-level) |
+| Keep each complete conversation in one row with an ordered `messages` array. | [Prepare conversation data](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-conversations#prepare-conversation-data) |
+| Use a conversation-compatible `builtin.output_quality` evaluator, configure a judge deployment, and map `messages` to `{{item.messages}}`. | [Define the data schema and evaluators](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-conversations#define-the-data-schema-and-evaluators) |
+| Create the evaluation and named run through the Project's OpenAI-compatible client. | [Create evaluation and run](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-conversations#create-evaluation-and-run) |
+
+The precise Python payload follows the SDK's
+[output-quality sample](https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/ai/azure-ai-projects/samples/evaluations/agentic_evaluators/sample_output_quality.py):
+inline `file_content`, `deployment_name` in initialization parameters, and
+`evaluation_level="conversation"` both there and on the run. The Learn guide
+instead illustrates an uploaded `file_id` and the `model` initialization
+parameter. Polling and paginated output retrieval follow the
+[asynchronous SDK evaluation sample](https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/ai/azure-ai-projects/samples/evaluations/sample_evaluations_graders_async.py).
+These are service-side transcript-quality evaluations; the guide does not
+establish audio-quality scoring.
+
+### Related API samples
 
 - [Projects SDK conversation-level output-quality sample](https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/ai/azure-ai-projects/samples/evaluations/agentic_evaluators/sample_output_quality.py)
 - [Projects SDK asynchronous evaluation sample](https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/ai/azure-ai-projects/samples/evaluations/sample_evaluations_graders_async.py)
