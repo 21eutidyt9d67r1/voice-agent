@@ -209,7 +209,7 @@ location such as the repository's `voice-agent-output` directory.
 ## Recorded voice-in/voice-out demonstration
 
 On October 24, 2026, **one agent with `store=True`** completed four distinct
-audio sessions (three spoken user/assistant exchanges each). Input was
+audio sessions with **real-time input pacing** (three spoken user/assistant exchanges each). Input was
 synthetic English speech generated locally with Windows System.Speech.
 All 12 turns sent real PCM input and received nonempty PCM output; 12 returned
 agent WAVs were saved. Each of the four conversations was read back as
@@ -258,12 +258,14 @@ for inspection with `--keep-resources`; the temporary judge deployment was
 removed. The earlier text-only/four-agent demonstration is superseded by this
 one-agent audio run and is not used as evidence of current voice behavior.
 
-Real-time input pacing was subsequently checked in a separate live audio probe:
+Real-time input pacing was initially checked in a separate live audio probe:
 9.4245 seconds of recorded speech was sent in 10.222 seconds across 95 chunks,
 with a minimum full-chunk interval of 100.28 ms. The service returned actual
-spoken output and the temporary probe agent was deleted. This verifies input
-pacing, not output playback or a new four-case evaluation; the evaluation
-results above were captured before the pacing change.
+spoken output and the temporary probe agent was deleted. The complete
+four-session suite was then rerun with real-time input pacing and again
+produced two passes, two intended failures, and zero evaluation errors.
+The table above reflects that full paced-input rerun, which exited successfully.
+Neither run plays output through local speakers.
 
 ## Offline checks
 
