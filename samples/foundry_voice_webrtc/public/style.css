@@ -23,3 +23,7 @@ header,footer{background:#f7f8f4e8;padding-left:18px;padding-right:18px}
 header,footer,#setup{background:rgba(247,248,244,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .message{background:rgba(242,245,237,.85)}
 .message.user{background:rgba(250,250,247,.88)}
+header{height:auto;min-height:100px;flex-wrap:wrap;gap:12px;padding-top:16px;padding-bottom:16px}
+.brand{min-width:0}
+.brand>span{font-size:clamp(14px,2vw,21px);letter-spacing:-.4px}
+@media(max-width:740px){header{min-height:76px}}
