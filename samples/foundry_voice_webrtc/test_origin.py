@@ -1,8 +1,11 @@
-"""Offline checks for local and explicitly configured public origins."""
+"""Offline checks for permitted origins and public assets."""
 
 import unittest
+import xml.etree.ElementTree as ET
 
-from server import origin_allowed
+from aiohttp.test_utils import TestClient, TestServer
+
+from server import Settings, create_app, origin_allowed
 
 
 class OriginTests(unittest.TestCase):
@@ -23,6 +26,21 @@ class OriginTests(unittest.TestCase):
         self.assertFalse(origin_allowed("attacker.example", "http",
                                         "https://voice.example.com",
                                         "https://voice.example.com"))
+
+
+class AssetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_page_links_to_a_served_svg_favicon(self):
+        async with TestClient(TestServer(create_app(Settings("", "")))) as client:
+            page = await client.get("/")
+            self.assertIn('<link rel="icon" type="image/svg+xml" href="/favicon.svg">', await page.text())
+            icon = await client.get("/favicon.svg")
+            self.assertEqual(icon.status, 200)
+            self.assertEqual(icon.content_type, "image/svg+xml")
+            svg = ET.fromstring(await icon.text())
+            self.assertEqual(svg.tag, "{http://www.w3.org/2000/svg}svg")
+            self.assertEqual(svg.attrib["viewBox"], "0 0 64 64")
+            private_file = await client.get("/server.py")
+            self.assertEqual(private_file.status, 404)
 
 
 if __name__ == "__main__":

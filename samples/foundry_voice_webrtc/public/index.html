@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>First Voice · Foundry agent</title><link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -12,30 +13,102 @@
     <div class="workspace">
       <section class="call-panel" aria-labelledby="call-title">
         <div class="panel-top"><h2 id="call-title">Voice session</h2><span id="connection" class="badge">Offline</span></div>
+        <div class="transport-control"><h2>Your Agent</h2><p id="agent-preparation" role="status">Checking for your saved Agent...</p><p>Model: <strong id="agent-model">Unavailable</strong> · Version: <strong id="agent-version">Not created</strong></p><p id="weather-tool-hint" hidden>Weather lookup is included through Foundry Toolbox.</p>
+          <p>Transcription: <strong id="agent-transcription">Unavailable</strong></p>
+          <label for="agent-model-choice">Change model</label><select id="agent-model-choice" disabled><option value="gpt-realtime-2.1">gpt-realtime-2.1</option><option value="azure-realtime">azure-realtime</option><option value="gpt-5.4">gpt-5.4</option></select>
+          <label for="agent-transcription-choice">Transcription model</label>
+          <select id="agent-transcription-choice" disabled>
+            <option value="" disabled>Choose a transcription model</option>
+            <option value="azure-speech">azure-speech</option>
+            <option value="azure-speech-streaming">azure-speech-streaming</option>
+            <option value="azure-llm-speech">azure-llm-speech</option>
+            <option value="mai-transcribe">mai-transcribe</option>
+            <option value="mai-transcribe-2" selected>mai-transcribe-2</option>
+            <option value="mai-transcribe-2-streaming">mai-transcribe-2-streaming</option>
+            <option value="gpt-live-transcribe">gpt-live-transcribe</option>
+            <option value="gpt-realtime-whisper">gpt-realtime-whisper</option>
+            <option value="gpt-transcribe">gpt-transcribe</option>
+            <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+            <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+            <option value="gpt-4o-transcribe-diarize">gpt-4o-transcribe-diarize</option>
+            <option value="whisper-1">whisper-1</option>
+          </select>
+          <p>Save model or transcription changes as a new version without deleting previous versions. New Agents default to mai-transcribe-2. Azure Realtime uses native Ava; switching back uses Tyler HD if the saved voice is native. Model availability depends on your project.</p>
+          <div class="agent-actions"><button id="save-model" disabled>Save new version</button><button id="show-settings" disabled>Show Agent settings</button></div>
+        </div>
         <div class="transport-control"><label for="transport">Connection</label><select id="transport"><option value="websocket">WebSocket — audio over HTTPS</option><option value="webrtc">WebRTC — direct audio</option></select><p>WebSocket avoids STUN/TURN. Both modes need server access to Azure.</p></div>
+        <div class="transport-control">
+          <label id="voice-label" for="voice">Output voice</label>
+          <select id="voice">
+            <option value="">Saved Agent voice</option>
+            <option value="en-US-Tessa:DragonHDLatestNeural">en-US-Tessa:DragonHDLatestNeural</option>
+            <option value="en-US-Tyler:DragonHDLatestNeural" selected>en-US-Tyler:DragonHDLatestNeural</option>
+            <option value="en-US-Paige:DragonHDLatestNeural">en-US-Paige:DragonHDLatestNeural</option>
+            <option value="en-US-Colin:DragonHDLatestNeural">en-US-Colin:DragonHDLatestNeural</option>
+            <option value="en-US-Brian:DragonHDLatestNeural">en-US-Brian:DragonHDLatestNeural</option>
+            <option value="en-US-Emma:DragonHDLatestNeural">en-US-Emma:DragonHDLatestNeural</option>
+            <option value="en-IN-Diya:DragonHDLatestNeural">en-IN-Diya:DragonHDLatestNeural</option>
+            <option value="zh-CN-Xiaoqi:DragonHDFlashLatestNeural">zh-CN-Xiaoqi:DragonHDFlashLatestNeural</option>
+            <option value="zh-CN-Xiaoke:DragonHDFlashLatestNeural">zh-CN-Xiaoke:DragonHDFlashLatestNeural</option>
+          </select>
+          <select id="native-voice" hidden disabled>
+            <option value="">Saved Agent voice</option>
+            <option value="ava">ava</option>
+            <option value="andrew">andrew</option>
+            <option value="emma">emma</option>
+            <option value="clara">clara</option>
+            <option value="liam">liam</option>
+            <option value="natasha">natasha</option>
+            <option value="rayn">rayn</option>
+            <option value="alvaro">alvaro</option>
+            <option value="dalia">dalia</option>
+            <option value="jorge">jorge</option>
+          </select>
+          <p>Availability depends on the project and voice catalog. Unsupported selections fail without substituting a voice. A voice preview for a different model applies after you save that model.</p>
+        </div>
+        <details class="transport-control">
+          <summary>Session personalization</summary>
+          <fieldset id="personalization">
+            <label><input id="personalize" type="checkbox"> Supply context before the greeting</label>
+            <label for="display-name">Demo display name</label><input id="display-name" maxlength="80" autocomplete="off">
+            <label for="user-context">User context (demo data only)</label><textarea id="user-context" maxlength="2000" rows="3" placeholder="For example: interested in beginner hiking routes."></textarea>
+            <label for="client-language">Client language</label><select id="client-language"><option value="en-US">English</option><option value="es-ES">Spanish</option></select>
+            <label><input id="english-only" type="checkbox" checked> English-only instructions (override client language)</label>
+          </fieldset>
+          <p>Context is unverified personalization, not identity. It is sent to Azure and may be persisted. English-only instructions do not block non-English audio or configure speech recognition.</p>
+        </details>
         <div id="orb" class="orb" aria-hidden="true"><span>◉</span></div>
         <h3 id="status" role="status">Ready when you are</h3><p id="hint">Start a session to enable your microphone.</p>
+        <p id="recording-notice" class="recording-notice"><strong>Audio is saved by default.</strong> Starting a conversation sends microphone audio and messages to Azure, where the conversation and audio are stored. After ending the call, download the log and audio below. Clearing this page does not delete Azure recordings.</p>
         <div class="controls"><button id="start" class="primary" disabled>Start conversation <span>↗</span></button><button id="mute" disabled aria-pressed="false">Mute mic</button><button id="stop" class="end" disabled>End</button></div>
         <button id="play" class="play" hidden>Enable speaker audio</button>
         <p id="error" class="error" role="alert" hidden></p>
         <div class="session-details"><div><span>AGENT</span><strong id="agent">Not configured</strong></div><div><span>MEDIA</span><strong id="media">WebSocket · PCM16 / 24 kHz</strong></div></div>
         <p class="privacy">Microphone audio and submitted text are sent to Azure during a call. Azure conversation/audio storage is enabled. Clearing this page does not delete Azure-stored data. This app does not save transcripts locally.</p>
+        <details id="advanced-agent" class="transport-control" hidden>
+          <summary>Advanced</summary>
+          <p>Reset permanently deletes this demo Agent and its saved versions, then saves a fresh Agent under the same name. Other clients using it may be affected. You must confirm the Agent name.</p>
+          <button id="recreate-agent" class="end" disabled>Reset Agent</button>
+        </details>
       </section>
       <section class="transcript-panel" aria-labelledby="transcript-title">
-        <div class="panel-top"><h2 id="transcript-title">The conversation</h2><button id="clear" class="text-button">Clear</button></div>
+        <div class="panel-top"><h2 id="transcript-title">The conversation</h2><div class="transcript-actions"><button id="download-conversation" class="text-button" disabled>Download log + audio</button><button id="clear" class="text-button">Clear</button></div></div>
         <p class="history-help">Replies stream here as live drafts. After an interruption, only the service's retained text remains; unheard text is removed.</p>
         <div id="transcript" role="log" aria-live="polite" aria-relevant="additions text"><div id="empty"><span>“</span><h3>Good conversations start with hello.</h3><p>Your words and the agent’s replies will appear here.</p></div></div>
         <form id="text-form" class="text-composer">
           <label for="text-input">Message your agent</label>
           <div class="text-composer-controls"><input id="text-input" type="text" maxlength="4000" placeholder="Type a message..." aria-describedby="text-help" autocomplete="off" disabled><button id="send-text" type="submit" disabled>Send</button></div>
           <p id="text-help">Start a conversation to send text. Press Enter or Send for a text-only reply; wait for the agent's response before sending another message. Mute the mic to use text only.</p>
+          <p id="download-status" role="status">End a conversation to download its stored JSON log and WAV audio.</p>
         </form>
         <div class="transcript-footer"><span class="dot"></span> Live conversation <span id="elapsed">00:00</span></div>
       </section>
     </div>
-    <details id="setup"><summary>Quick setup & connection notes</summary><ol><li>Create a <strong>Voice</strong> agent in your Foundry project using the <a href="https://learn.microsoft.com/en-us/azure/foundry/agents/quickstarts/prompt-voice-agent?pivots=portal" target="_blank" rel="noreferrer">Microsoft quickstart</a>. WebSocket and WebRTC transports are generally available. WebRTC needs ICE connectivity; STUN/TURN may be needed.</li><li>Install Azure CLI, open a normal PowerShell window, and run <code>az login</code>. Use the tenant/subscription containing your project. Keep your project endpoint and agent name in <code>.env</code>. Agent Service requires <strong>Microsoft Entra ID, not a resource API key</strong>; no client secret is needed. Your signed-in account needs access to the Foundry project or agent.</li><li>For WebSocket, configure mono PCM16 audio at 24 kHz, server-side turn detection with automatic responses, and speech transcription in Foundry. Open this page on localhost, choose a connection, and allow the microphone.</li></ol><p>Bearer tokens stay on the backend. Run the server as the same Windows user who ran <code>az login</code>, with outbound network access. Check authentication and session startup with <code>python check_websocket.py</code>.</p></details>
+    <details id="setup"><summary>Quick setup & connection notes</summary><ol><li>Configure your Foundry project endpoint in <code>.env</code>. No existing Agent or Agent name is required: the demo uses <code>webrtc-personalized-hd-demo</code> by default. Set <code>AZURE_VOICE_AGENT_NAME</code> only to choose a different saved Agent.</li><li>Install Azure CLI, open a normal PowerShell window, and run <code>az login</code>. Use the tenant/subscription containing your project. Agent Service requires <strong>Microsoft Entra ID, not a resource API key</strong>; no client secret is needed. Your account needs permission to read, create, enable, and use Agents.</li><li>If no Agent exists, select <strong>Create Agent & start</strong>. The demo creates and saves the Agent before requesting microphone access. Later visits reuse it automatically. Choose a connection and allow the microphone. WebSocket needs no STUN/TURN; WebRTC needs ICE connectivity.</li></ol><p>Credentials stay on the backend. Run the server as the same Windows user who ran <code>az login</code>, with outbound network access. After Agent setup, check authentication and session startup with <code>python check_websocket.py</code>.</p></details>
+    <p class="privacy">First visit: create and save an Agent, then talk. Future visits: reuse the saved Agent. Existing definitions are preserved; missing Agents use the bundled personalized example. Azure creation requires appropriate permissions and may incur usage charges.</p>
   </main>
   <footer>Built for the first hello.<span>Foundry voice agents · WebSocket / WebRTC</span></footer>
   <audio id="remote-audio" autoplay></audio>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="panel-top"><h2 id="settings-title">Saved Agent settings · YAML</h2><button id="close-settings">Close</button></div><p id="settings-version"></p><pre id="settings-yaml"></pre><p>Read-only. Credential fields are redacted.</p></dialog>
 </body>
 </html>

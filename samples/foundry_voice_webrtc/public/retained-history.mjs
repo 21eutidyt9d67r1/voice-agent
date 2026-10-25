@@ -24,12 +24,16 @@ export class RetainedHistory {
     // ID-less drafts wait for output_item metadata; a response can contain multiple items.
     if (!record.hidden && !record.id.startsWith('response:')) this.render(record);
   }
-  user(id, text) {
+  user(id, text, append = false, pending = false) {
     if (!id || typeof text !== 'string') return;
     const record = this.item(id, 'user');
-    record.text = text;
-    record.status = 'complete';
+    record.text = append && record.status !== 'transcribing' ? record.text + text : text;
+    record.status = pending ? 'transcribing' : 'complete';
     this.show(record);
+  }
+  reserveUser(id, text = 'Transcribing...') {
+    if (id && (!this.items.has(id) || this.items.get(id).status === 'transcribing'))
+      this.user(id, text, false, true);
   }
   resolve(event, itemId = event.item_id) {
     const responseId = event.response_id;
@@ -171,6 +175,10 @@ export class RetainedHistory {
     for (const id of this.responses.keys()) this.clearedResponses.add(id);
   }
   dispose() {
-    for (const record of this.items.values()) this.unavailable(record, 'The session ended before retrieval completed.');
+    for (const record of this.items.values()) {
+      if (record.role === 'user' && record.status === 'transcribing')
+        this.user(record.id, 'Speech transcription unavailable.');
+      this.unavailable(record, 'The session ended before retrieval completed.');
+    }
   }
 }

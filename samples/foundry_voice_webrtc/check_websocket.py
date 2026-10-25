@@ -13,7 +13,7 @@ async def check():
     cfg = load_settings()
     if not cfg.configured:
         print(json.dumps({"ok": False, "stage": "configuration", "issues": cfg.setup_issues,
-                          "message": "Set project endpoint and agent name in .env, then sign in with az login."}))
+                          "message": "Set the project endpoint in .env, then sign in with az login. Create the Agent through the demo UI before running this diagnostic."}))
         return 1
     events = []
     stage = "azure_cli_authentication"

@@ -26,7 +26,7 @@ param entraClientSecret string = ''
 param azureAiProjectEndpoint string
 
 @secure()
-param azureVoiceAgentName string
+param azureVoiceAgentName string = ''
 
 @secure()
 param azureApiVersion string
@@ -35,6 +35,8 @@ param azureApiVersion string
 param foundryFeatures string
 
 param iceServersJson string = '[{"urls":"stun:stun.l.google.com:19302"}]'
+param personalizationRequired bool = false
+param allowAgentRecreate bool = false
 
 param containerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -102,6 +104,8 @@ module containerApp './modules/container-app.bicep' = {
     azureApiVersion: azureApiVersion
     foundryFeatures: foundryFeatures
     iceServersJson: iceServersJson
+    personalizationRequired: personalizationRequired
+    allowAgentRecreate: allowAgentRecreate
     revisionSuffix: revisionSuffix
     entraTenantId: entraTenantId
     entraClientId: entraClientId

@@ -43,8 +43,8 @@ if (-not (Test-Path -LiteralPath $envPath)) {
 $settings = Read-DotEnv $envPath
 $projectEndpoint = $settings["AZURE_AI_PROJECT_ENDPOINT"]
 $agentName = $settings["AZURE_VOICE_AGENT_NAME"]
-if (-not $projectEndpoint -or -not $agentName) {
-    throw ".env must define AZURE_AI_PROJECT_ENDPOINT and AZURE_VOICE_AGENT_NAME."
+if (-not $projectEndpoint) {
+    throw ".env must define AZURE_AI_PROJECT_ENDPOINT."
 }
 
 Push-Location $root
@@ -70,13 +70,17 @@ try {
         "logAnalyticsName=$AppName-logs",
         "applicationInsightsName=$AppName-insights",
         "azureAiProjectEndpoint=$projectEndpoint",
-        "azureVoiceAgentName=$agentName",
         "azureApiVersion=$($settings['AZURE_API_VERSION'])",
         "foundryFeatures=$($settings['FOUNDRY_FEATURES'])"
     )
+    if (-not [string]::IsNullOrWhiteSpace($agentName)) {
+        $commonParameters += "azureVoiceAgentName=$agentName"
+    }
     if ($settings.ContainsKey("ICE_SERVERS_JSON")) {
         $commonParameters += "iceServersJson=$($settings['ICE_SERVERS_JSON'])"
     }
+    $commonParameters += "personalizationRequired=$($settings['PERSONALIZATION_REQUIRED'] -eq 'true')".ToLowerInvariant()
+    $commonParameters += "allowAgentRecreate=$($settings['ALLOW_AGENT_RECREATE'] -eq 'true')".ToLowerInvariant()
 
     Invoke-AzureCli deployment sub create `
         --name $deploymentName `
@@ -111,13 +115,13 @@ try {
     $foundryRole = Invoke-AzureCli role assignment list `
         --assignee-object-id $principalId `
         --scope $FoundryResourceId `
-        --query "[?roleDefinitionName=='Azure AI Developer'].id | [0]" `
+        --query "[?roleDefinitionName=='Foundry User'].id | [0]" `
         --output tsv
     if (-not $foundryRole) {
         Invoke-AzureCli role assignment create `
             --assignee-object-id $principalId `
             --assignee-principal-type ServicePrincipal `
-            --role "Azure AI Developer" `
+            --role "Foundry User" `
             --scope $FoundryResourceId `
             --output none
     }

@@ -11,13 +11,15 @@ param appInsightsConnectionString string
 @secure()
 param azureAiProjectEndpoint string
 @secure()
-param azureVoiceAgentName string
+param azureVoiceAgentName string = ''
 @secure()
 param azureApiVersion string
 @secure()
 param foundryFeatures string
 @secure()
 param iceServersJson string
+param personalizationRequired bool = false
+param allowAgentRecreate bool = false
 param appPort int = 8080
 param revisionSuffix string = 'icefix'
 param entraTenantId string = ''
@@ -92,6 +94,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'app'
           image: containerImage
           env: [
+            {
+              name: 'ALLOW_AGENT_RECREATE'
+              value: allowAgentRecreate ? 'true' : 'false'
+            }
+            {
+              name: 'PERSONALIZATION_REQUIRED'
+              value: personalizationRequired ? 'true' : 'false'
+            }
             {
               name: 'AZURE_AI_PROJECT_ENDPOINT'
               value: azureAiProjectEndpoint

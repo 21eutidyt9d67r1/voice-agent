@@ -1,0 +1,11 @@
+{
+  "description": "Search the web for current weather conditions and forecasts for the caller's requested location.",
+  "tools": [
+    {
+      "type": "web_search",
+      "name": "weather",
+      "description": "Search for current weather conditions or forecasts. Include the caller's city, country or region, and requested date in the search query."
+    }
+  ],
+  "metadata": {"sample": "foundry_voice_webrtc", "purpose": "weather"}
+}
