@@ -34,6 +34,37 @@ The browser also displays an animated Seattle landscape using Open-Meteo current
 weather, refreshed every 15 minutes. Cloud cover, day/night, precipitation, and
 wind drive the sky, rain/snow, and drifting leaves; no location permission or
 API key is required. This is a stylized landscape, not a live camera feed.
+Translucent panels reveal layered clouds, hazy ridges, and rippling water.
+Clouds and precipitation follow wind direction with smooth gusts; snow flutters,
+nearby trees sway, and water highlights move subtly. Text and recording notices
+retain stronger contrast over the scenery.
+Foreground branches bend from fixed roots with fluttering attached leaves;
+loose leaves tumble across the scene in breezes. Tree movement increases with
+wind strength and stops in calm conditions.
+Tree roots and walking wildlife share the foreground bank's terrain profile,
+keeping them on land rather than in the water.
+A small flock crosses the daytime sky with alternating wingbeats and gliding;
+birds are hidden at night and during fog, snow, or heavier precipitation.
+Three closer seagulls with pale bodies and dark wingtips circle above the water,
+banking through their turns and alternating wingbeats with gliding.
+A deer and fawn stroll along the foreground, occasionally pausing to graze,
+while a small group of ducks drifts across the water with subtle wakes. These
+decorative animals are hidden in fog, snow, and heavier precipitation; they are
+not live wildlife observations. All movement shares the scenery pause control.
+Snow-capped Mount Rainier and a distant Space Needle silhouette anchor the
+background. Their colors soften at night and in fog. Seattle's coordinates and
+the current UTC time drive an approximate geometric solar-position calculation:
+the sun moves east to west, daylight fades gradually through dawn and dusk,
+and twilight adds a warm horizon glow. Cloud cover and precipitation reduce
+brightness, while stars appear on clearer nights. This uses the device clock,
+not its timezone or the weather report's older timestamp. Atmospheric refraction,
+terrain occlusion, and the Moon's position are not modeled. The scene is a stylized
+Seattle composition, not an exact geographic viewpoint.
+Choose **Scenery only** to hide the interface and enjoy the landscape; the
+floating **Show panels** and **Pause scenery** buttons remain accessible.
+These compact icon buttons have descriptive tooltips and accessible names.
+**Show panels** or Escape restores the interface and previous scroll position.
+Hiding panels does not end or mute an active voice session.
 The weather request goes directly from the browser to `api.open-meteo.com`
 (Seattle's fixed coordinates only; no agent or conversation data).
 The timestamp is Seattle local time. Failed updates are shown explicitly;
