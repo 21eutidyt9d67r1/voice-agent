@@ -3,17 +3,24 @@
 import asyncio
 import base64
 import binascii
+import copy
+import hmac
 import json
 import logging
 import os
 import re
+import secrets
+import tempfile
+import time
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlsplit
 
 import aiohttp
+import yaml
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -24,6 +31,220 @@ LOGGER = logging.getLogger(__name__)
 MAX_FRAME = 256 * 1024
 MAX_UPSTREAM_FRAME = 4 * 1024 * 1024
 TRANSPORTS = {"websocket", "webrtc"}
+DEFAULT_AGENT_NAME = "webrtc-personalized-hd-demo"
+WEATHER_TOOLBOX_NAME = "weather"
+LANGUAGES = {"en-US": "English", "es-ES": "Spanish"}
+HD_VOICES = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler", "Paige", "Colin", "Brian", "Emma")} | {
+    "en-IN-Diya:DragonHDLatestNeural", "zh-CN-Xiaoqi:DragonHDFlashLatestNeural", "zh-CN-Xiaoke:DragonHDFlashLatestNeural"}
+NATIVE_VOICES = {"ava", "andrew", "emma", "clara", "liam", "natasha", "rayn", "alvaro", "dalia", "jorge"}
+MODELS = {"gpt-realtime-2.1", "azure-realtime", "gpt-5.4"}
+TRANSCRIPTION_MODELS = {
+    "azure-speech", "azure-speech-streaming", "azure-llm-speech",
+    "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming",
+    "gpt-live-transcribe", "gpt-realtime-whisper", "gpt-transcribe",
+    "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-transcribe-diarize", "whisper-1",
+}
+DEFAULT_TRANSCRIPTION_MODEL = "mai-transcribe-2"
+MAX_RECORDING_BYTES = 128 * 1024 * 1024
+MAX_LOG_BYTES = 16 * 1024 * 1024
+
+
+class ConversationDownloadError(Exception):
+    def __init__(self, message, status=502):
+        super().__init__(message)
+        self.status = status
+
+
+def conversation_download_token(secret, agent, conversation):
+    if not isinstance(conversation, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", conversation):
+        raise ValueError("Invalid service conversation ID.")
+    payload = json.dumps({"agent": agent, "conversation": conversation,
+                          "expires": int(time.time()) + 86400}, separators=(",", ":")).encode()
+    signature = hmac.digest(secret, payload, "sha256")
+    return ".".join(base64.urlsafe_b64encode(part).decode().rstrip("=") for part in (payload, signature))
+
+
+def verify_download_token(secret, agent, token):
+    try:
+        if not isinstance(token, str) or len(token) > 1024:
+            raise ValueError
+        parts = token.split(".")
+        if len(parts) != 2:
+            raise ValueError
+        payload, signature = (base64.b64decode(part + "=" * (-len(part) % 4),
+                                              altchars=b"-_", validate=True) for part in parts)
+        if not hmac.compare_digest(signature, hmac.digest(secret, payload, "sha256")):
+            raise ValueError
+        claims = json.loads(payload)
+        if (not isinstance(claims, dict) or set(claims) != {"agent", "conversation", "expires"}
+                or claims["agent"] != agent or type(claims["expires"]) is not int
+                or claims["expires"] <= time.time()
+                or not isinstance(claims["conversation"], str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", claims["conversation"])):
+            raise ValueError
+        return claims["conversation"]
+    except (ValueError, TypeError, binascii.Error) as error:
+        raise ConversationDownloadError(
+            "This download link is invalid, expired, or from a restarted server. "
+            "Existing recordings remain in Foundry.", 403) from error
+
+
+async def recorded_json(response):
+    if response.status != 200:
+        raise ConversationDownloadError(
+            f"Foundry could not read the stored conversation (HTTP {response.status}). "
+            "Check the server identity's conversation-read permissions.")
+    raw = await response.content.read(MAX_LOG_BYTES + 1)
+    if len(raw) > MAX_LOG_BYTES:
+        raise ConversationDownloadError("The conversation log exceeds this demo's 16 MiB limit. Use Foundry to download it.", 413)
+    result = json.loads(raw)
+    if not isinstance(result, dict):
+        raise ConversationDownloadError("Foundry returned an invalid conversation log.")
+    return result, len(raw)
+
+
+async def write_conversation_archive(client, cfg, headers, conversation, output):
+    base = (f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/endpoint/protocols/voice/"
+            f"conversations/{quote(conversation, safe='')}")
+    query = {"api-version": cfg.api_version}
+    for _ in range(30):
+        async with client.get(base, params=query, headers=headers, allow_redirects=False) as response:
+            if response.status not in {404, 409}:
+                record, _ = await recorded_json(response)
+                if record.get("status") == "completed":
+                    break
+                if record.get("status") in {"failed", "canceled", "cancelled"}:
+                    raise ConversationDownloadError("The stored conversation did not complete successfully. Check its records in Foundry.", 409)
+        await asyncio.sleep(2)
+    else:
+        raise ConversationDownloadError("Azure is still finalizing this recording. Wait a little, then download again.", 409)
+
+    items, cursors, log_bytes = [], set(), 0
+    params = {**query, "limit": 100, "order": "asc"}
+    while True:
+        async with client.get(f"{base}/items", params=params, headers=headers, allow_redirects=False) as response:
+            page, size = await recorded_json(response)
+        log_bytes += size
+        if log_bytes > MAX_LOG_BYTES:
+            raise ConversationDownloadError("The conversation log exceeds this demo's 16 MiB limit. Use Foundry to download it.", 413)
+        if not isinstance(page.get("data"), list) or type(page.get("has_more")) is not bool:
+            raise ConversationDownloadError("Foundry returned an invalid conversation items page.")
+        items.extend(page["data"])
+        if not page["has_more"]:
+            break
+        cursor = page.get("last_id")
+        if not isinstance(cursor, str) or not cursor or cursor in cursors:
+            raise ConversationDownloadError("Foundry returned an invalid conversation pagination cursor.")
+        cursors.add(cursor)
+        params = {**params, "after": cursor}
+
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("conversation.json", json.dumps(
+            {"conversation": record, "items": items}, ensure_ascii=False, indent=2).encode("utf-8"))
+        for _ in range(30):
+            async with client.get(f"{base}/audio/content", params=query, headers=headers,
+                                  allow_redirects=False) as response:
+                if response.status in {404, 409}:
+                    await asyncio.sleep(2)
+                    continue
+                if response.status != 200:
+                    raise ConversationDownloadError(
+                        f"Foundry could not download the recording (HTTP {response.status}). "
+                        "Check recording permissions or customer-managed storage in Foundry.")
+                size, prefix = 0, bytearray()
+                with archive.open("audio.wav", "w") as audio:
+                    async for chunk in response.content.iter_chunked(65536):
+                        size += len(chunk)
+                        if size > MAX_RECORDING_BYTES:
+                            raise ConversationDownloadError(
+                                "The recording exceeds this demo's 128 MiB limit. Use Foundry to download it.", 413)
+                        prefix.extend(chunk[:max(0, 12 - len(prefix))])
+                        audio.write(chunk)
+                if prefix[:4] != b"RIFF" or prefix[8:12] != b"WAVE":
+                    raise ConversationDownloadError("Foundry did not return a WAV recording. No download was created.")
+                break
+        else:
+            raise ConversationDownloadError("Azure is still preparing the audio. Wait a little, then download again.", 409)
+
+
+async def download_conversation(request):
+    if not allowed_origin(request):
+        return web.json_response({"error": "Open the page on this server."}, status=403)
+    cfg = request.app[SETTINGS]
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": "Use the download button for your conversation."}, status=400)
+    response = None
+    try:
+        if not isinstance(body, dict) or set(body) != {"downloadToken"}:
+            return web.json_response({"error": "Use the download button for your conversation."}, status=400)
+        conversation = verify_download_token(request.app[DOWNLOAD_SECRET], cfg.agent, body["downloadToken"])
+        async with asyncio.timeout(90), aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as client:
+            token = await request.app[TOKENS].get_token(client)
+            headers = {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}
+            with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as output:
+                await write_conversation_archive(client, cfg, headers, conversation, output)
+                response = web.StreamResponse(headers={
+                    "Content-Type": "application/zip",
+                    "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                    "Content-Disposition": f'attachment; filename="conversation-{conversation}.zip"',
+                    "Content-Length": str(output.tell()),
+                })
+                output.seek(0)
+                await response.prepare(request)
+                while chunk := output.read(65536):
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+    except ConversationDownloadError as error:
+        LOGGER.warning("Conversation download failed (%s)", type(error).__name__)
+        return web.json_response({"error": str(error)}, status=error.status)
+    except (AuthenticationError, aiohttp.ClientError, TimeoutError, ValueError, OSError) as error:
+        LOGGER.warning("Conversation download failed (%s)", type(error).__name__)
+        if response is not None and response.prepared:
+            raise
+        return web.json_response({"error": "Could not download the stored conversation. Check Azure access and retry after the recording is finalized."}, status=502)
+
+
+def personalization_header(frame):
+    if not isinstance(frame, dict) or set(frame) != {"type", "display_name", "user_context", "client_language", "english_only"}:
+        raise ValueError("Invalid personalization fields.")
+    if frame["type"] != "bridge.personalize" or type(frame["english_only"]) is not bool:
+        raise ValueError("Invalid personalization request.")
+    for key, limit in (("display_name", 80), ("user_context", 2000)):
+        value = frame[key]
+        if not isinstance(value, str) or len(value) > limit:
+            raise ValueError(f"{key} must be text of at most {limit} characters.")
+    language = frame["client_language"]
+    if not isinstance(language, str) or language not in LANGUAGES:
+        raise ValueError("Choose English or Spanish.")
+    english = frame["english_only"]
+    name = frame["display_name"].strip()
+    greeting = (
+        f"Hello, {name}! How can I help you?" if name else "Hello! How can I help you?"
+    ) if english or language == "en-US" else (
+        f"¡Hola, {name}! ¿En qué puedo ayudarte?" if name else "¡Hola! ¿En qué puedo ayudarte?"
+    )
+    values = {
+        "display_name": name,
+        "user_context": frame["user_context"].strip(),
+        "client_language": language,
+        "language_policy": (
+            "Conduct the entire conversation in English, including greetings, written and spoken replies, "
+            "clarifications, summaries, and tool-result explanations. If the caller uses another language, "
+            "say in English: Please continue in English so I can help you. Do not fulfill or translate "
+            "the non-English request. Do not switch languages even when requested. Proper names and "
+            "identifiers may retain their original form. For unclear input, ask in English for repetition "
+            "rather than assuming another language. This policy overrides the client language preference."
+            if english else f"Greet and respond in {LANGUAGES[language]} by default; follow the caller's language preference."
+        ),
+        "greeting_text": greeting,
+    }
+    encoded = json.dumps(values, ensure_ascii=True, separators=(",", ":"))
+    if len(encoded) > 16000:
+        raise ValueError("Encoded personalization exceeds the 16 KiB limit.")
+    return encoded
 
 
 @dataclass
@@ -34,19 +255,22 @@ class CallState:
 @dataclass(frozen=True)
 class Settings:
     endpoint: str
-    agent: str
+    agent: str = DEFAULT_AGENT_NAME
     api_version: str = "v1"
     features: str = "VoiceAgents=V1Preview"
     ice_servers: tuple = ()
     public_origin: str = ""
+    personalization_required: bool = False
+    allow_agent_recreate: bool = False
+
+    def __post_init__(self):
+        object.__setattr__(self, "agent", self.agent.strip() or DEFAULT_AGENT_NAME)
 
     @property
     def setup_issues(self):
         issues = []
         if not self.endpoint or "YOUR-" in self.endpoint:
             issues.append("Set AZURE_AI_PROJECT_ENDPOINT to your Foundry project endpoint.")
-        if not self.agent:
-            issues.append("Set AZURE_VOICE_AGENT_NAME to your saved voice agent's name.")
         return issues
 
     @property
@@ -99,7 +323,8 @@ def load_settings():
                     os.getenv("AZURE_VOICE_AGENT_NAME", "").strip(),
                     os.getenv("AZURE_API_VERSION", "v1"),
                     os.getenv("FOUNDRY_FEATURES", "VoiceAgents=V1Preview"), tuple(ice),
-                    public_origin)
+                    public_origin, os.getenv("PERSONALIZATION_REQUIRED", "").lower() == "true",
+                    os.getenv("ALLOW_AGENT_RECREATE", "").lower() == "true")
 
 
 def origin_allowed(host_value, scheme, origin, public_origin=""):
@@ -137,6 +362,11 @@ async def public_config(request):
                               "authentication": auth_mode,
                               "azureCliInstalled": auth_mode != "azure_cli" or bool(find_azure_cli()),
                               "setupIssues": cfg.setup_issues,
+                              "personalizationRequired": cfg.personalization_required,
+                              "agentRecreateAllowed": cfg.allow_agent_recreate,
+                              "models": sorted(MODELS),
+                              "transcriptionModels": sorted(TRANSCRIPTION_MODELS),
+                              "defaultTranscriptionModel": DEFAULT_TRANSCRIPTION_MODEL,
                               "transports": ["websocket", "webrtc"], "defaultTransport": "websocket"})
 
 
@@ -144,9 +374,351 @@ async def health(request):
     return web.json_response({"status": "ok"})
 
 
+class AgentPreparationError(Exception):
+    """A safe error from the configured Agent's lifecycle operations."""
+
+
+def weather_toolbox_attached(definition):
+    return any(tool.get("type") == "toolbox" and tool.get("toolbox_name") == WEATHER_TOOLBOX_NAME
+               and bool(tool.get("toolbox_version")) for tool in definition.get("tools") or []
+               if isinstance(tool, dict))
+
+
+async def prepare_weather_toolbox(client, cfg, headers):
+    query = urlencode({"api-version": cfg.api_version})
+    url = f"{cfg.project_url()}/toolboxes/{WEATHER_TOOLBOX_NAME}"
+    async with client.get(f"{url}?{query}", headers=headers, allow_redirects=False) as response:
+        if response.status == 200:
+            toolbox = await response.json()
+            versions = toolbox.get("versions") if isinstance(toolbox, dict) else None
+            version = versions.get("latest") if isinstance(versions, dict) else None
+        elif response.status == 404:
+            async with client.get(f"{cfg.project_url()}/toolboxes?{query}&limit=1",
+                                  headers=headers, allow_redirects=False) as collection:
+                if collection.status != 200:
+                    raise AgentPreparationError(
+                        f"Cannot verify the project Toolboxes API (HTTP {collection.status}). No Agent was created.")
+            payload = json.loads((ROOT / "weather-toolbox.json").read_text())
+            async with client.post(f"{url}/versions?{query}", headers=headers, json=payload,
+                                   allow_redirects=False) as published:
+                if published.status not in {200, 201}:
+                    raise AgentPreparationError(
+                        f"Weather Toolbox creation failed (HTTP {published.status}). Check Toolbox permissions and web search availability. No Agent was created.")
+                version = await published.json()
+        else:
+            raise AgentPreparationError(
+                f"Weather Toolbox lookup failed (HTTP {response.status}). Check Toolbox permissions. No Agent was created.")
+    number = version.get("version") if isinstance(version, dict) else None
+    tools = version.get("tools") if isinstance(version, dict) else None
+    if (not isinstance(number, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", number)
+            or number.lower() == "latest" or not isinstance(tools, list) or not any(
+                isinstance(tool, dict) and tool.get("type") == "web_search" for tool in tools)):
+        raise AgentPreparationError(
+            "The weather Toolbox must have a published version containing a web_search tool. It was not overwritten; no Agent was created.")
+    return {"type": "toolbox", "toolbox_name": WEATHER_TOOLBOX_NAME, "toolbox_version": number}
+
+
+async def lookup_configured_agent(client, cfg, headers, *, include_version=False):
+    required = set(json.loads((ROOT / "personalized-agent.json").read_text())["structured_inputs"])
+    async with client.get(cfg.agent_url(), headers=headers, allow_redirects=False) as response:
+        if response.status == 200:
+            agent = await response.json()
+            latest = (agent.get("versions") or {}).get("latest") or {}
+            definition = latest.get("definition") or {}
+            if definition.get("kind") != "voice":
+                raise AgentPreparationError("The configured Agent exists but is not a voice Agent. It was not changed.")
+            if cfg.personalization_required:
+                if not required.issubset(definition.get("structured_inputs") or {}):
+                    raise AgentPreparationError("The existing Agent lacks the demo structured inputs. Choose a new Agent name; it was not overwritten.")
+            return latest if include_version else definition
+        elif response.status == 404:
+            # Verify the project API exists before interpreting an Agent 404 as absence.
+            async with client.get(cfg.agent_url(collection=True), headers=headers, allow_redirects=False) as project:
+                if project.status != 200:
+                    raise AgentPreparationError(f"Cannot verify the project Agents API (HTTP {project.status}). No Agent was created.")
+            return None
+        else:
+            raise AgentPreparationError(f"Agent lookup failed (HTTP {response.status}). Check Foundry permissions; no Agent was created.")
+
+
+def transcription_model(definition):
+    settings = ((definition.get("audio") or {}).get("input") or {}).get("transcription")
+    return settings.get("model") if isinstance(settings, dict) else None
+
+
+async def inspect_configured_agent(client, cfg, headers):
+    latest = await lookup_configured_agent(client, cfg, headers, include_version=True)
+    definition = latest["definition"] if latest is not None else None
+    demo = json.loads((ROOT / "personalized-agent.json").read_text())
+    required = set(demo["structured_inputs"])
+    return {"agent": cfg.agent, "exists": definition is not None,
+            "model": (demo if definition is None else definition).get("model"),
+            "transcriptionModel": transcription_model(demo if definition is None else definition),
+            "version": latest.get("version") if latest is not None else None,
+            "weatherEnabled": definition is not None and weather_toolbox_attached(definition),
+            "personalizationRequired": cfg.personalization_required or (
+                definition is not None and required.issubset(definition.get("structured_inputs") or {}))}
+
+
+async def prepare_configured_agent(client, cfg, headers):
+    latest = await lookup_configured_agent(client, cfg, headers, include_version=True)
+    definition = latest["definition"] if latest is not None else None
+    version = latest.get("version") if latest is not None else None
+    created = definition is None
+    if created:
+        definition = json.loads((ROOT / "personalized-agent.json").read_text())
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cfg.agent):
+            raise AgentPreparationError("The configured Agent name must be 1-63 alphanumeric/hyphen characters, starting and ending with an alphanumeric character.")
+        definition["tools"] = [await prepare_weather_toolbox(client, cfg, headers)]
+        url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions?{urlencode({'api-version': cfg.api_version})}"
+        async with client.post(url, headers=headers, json={
+            "definition": definition, "metadata": {"sample": "foundry_voice_webrtc"}
+        }, allow_redirects=False) as publish:
+            if publish.status not in {200, 201}:
+                raise AgentPreparationError(f"Agent creation failed (HTTP {publish.status}). Check creation permissions and model/voice availability.")
+            published = await publish.json()
+            if not isinstance(published, dict) or not isinstance(published.get("version"), str):
+                raise AgentPreparationError("The Agent was published but its version could not be verified. Retry setup without resetting.")
+            version = published["version"]
+    url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}:enable?{urlencode({'api-version': cfg.api_version})}"
+    async with client.post(url, headers=headers, allow_redirects=False) as enabled:
+        if enabled.status != 204:
+            raise AgentPreparationError(f"Agent enable failed (HTTP {enabled.status}). Retry preparation; an existing version will not be overwritten.")
+    required = set(json.loads((ROOT / "personalized-agent.json").read_text())["structured_inputs"])
+    return {"agent": cfg.agent, "created": created, "model": definition.get("model"),
+            "transcriptionModel": transcription_model(definition),
+            "version": version,
+            "weatherEnabled": weather_toolbox_attached(definition),
+            "personalizationRequired": cfg.personalization_required or required.issubset(definition.get("structured_inputs") or {})}
+
+
+def model_definition(definition, model, transcription=None):
+    if model not in MODELS:
+        raise AgentPreparationError("Choose one of the supported demo models.")
+    if transcription is not None and (not isinstance(transcription, str) or transcription not in TRANSCRIPTION_MODELS):
+        raise AgentPreparationError("Choose one of the supported transcription models.")
+    updated = copy.deepcopy(definition)
+    updated["model_type"], updated["model"] = "managed", model
+    audio = updated.setdefault("audio", {})
+    input_audio, output = audio.setdefault("input", {}), audio.setdefault("output", {})
+    if transcription is not None:
+        settings = input_audio.get("transcription")
+        input_audio["transcription"] = {**(settings if isinstance(settings, dict) else {}), "model": transcription}
+    if definition.get("model") == model and definition.get("model_type") == "managed":
+        return updated
+    # Azure owns turn detection so the requested headset denoiser remains usable.
+    detection = input_audio.get("turn_detection")
+    if isinstance(detection, dict) and detection.get("type") in {"server_vad", "semantic_vad"}:
+        detection["type"] = "azure_semantic_vad"
+        detection.setdefault("languages", ["en", "es"])
+    if model == "azure-realtime":
+        for field in ("voice_locale", "voice_temperature", "custom_lexicon_url", "custom_text_normalization_url",
+                      "prefer_locales", "style", "pitch", "volume", "custom_voice_endpoint_id", "personal_voice_model"):
+            output.pop(field, None)
+        output["voice"], output["voice_type"] = "ava", "azure-realtime-native"
+    elif output.get("voice_type") == "azure-realtime-native" or (
+            isinstance(output.get("voice"), dict) and output["voice"].get("type") == "azure-realtime-native"):
+        output["voice"], output["voice_type"] = "en-US-Tyler:DragonHDLatestNeural", "azure-standard"
+    return updated
+
+
+class AgentYamlDumper(yaml.SafeDumper):
+    pass
+
+
+AgentYamlDumper.add_representer(str, lambda dumper, value: dumper.represent_scalar(
+    "tag:yaml.org,2002:str", value, style="|" if "\n" in value else None))
+
+
+def redact_settings(value):
+    sensitive = {"headers", "authorization", "api_key", "apikey", "client_secret", "password",
+                 "access_token", "refresh_token", "token", "secret", "credential", "credentials",
+                 "connection_string", "private_key"}
+    if isinstance(value, dict):
+        return {key: "[redacted]" if key.lower().replace("-", "_") in sensitive else redact_settings(item)
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_settings(item) for item in value]
+    return value
+
+
+async def agent_settings(request):
+    cfg = request.app[SETTINGS]
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as client:
+            token = await request.app[TOKENS].get_token(client)
+            latest = await lookup_configured_agent(client, cfg, {
+                "Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}, include_version=True)
+        if latest is None:
+            return web.json_response({"error": "Create the Agent before viewing saved settings."}, status=404)
+        text = yaml.dump(redact_settings({"name": cfg.agent, "version": latest.get("version"),
+            "definition": latest["definition"]}), Dumper=AgentYamlDumper, sort_keys=False, allow_unicode=True)
+        return web.json_response({"yaml": text, "model": latest["definition"].get("model"),
+                                  "transcriptionModel": transcription_model(latest["definition"]), "version": latest.get("version")})
+    except (AuthenticationError, AgentPreparationError, aiohttp.ClientError, TimeoutError, ValueError) as error:
+        LOGGER.warning("Agent settings lookup failed (%s)", type(error).__name__)
+        return web.json_response({"error": "Could not read saved Agent settings. Check Foundry access and retry."}, status=502)
+
+
+async def change_agent_model(request):
+    if not allowed_origin(request):
+        return web.json_response({"error": "Open the page on this server."}, status=403)
+    cfg = request.app[SETTINGS]
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": "Choose a model and the current Agent version."}, status=400)
+    if (not isinstance(body, dict) or set(body) not in ({"model", "version"}, {"model", "version", "transcriptionModel"})
+            or not isinstance(body["model"], str) or body["model"] not in MODELS
+            or not isinstance(body["version"], str) or not body["version"]
+            or ("transcriptionModel" in body and (
+                not isinstance(body["transcriptionModel"], str) or body["transcriptionModel"] not in TRANSCRIPTION_MODELS))):
+        return web.json_response({"error": "Choose supported Agent/transcription models and the current Agent version."}, status=400)
+    async with request.app[PREPARATION]:
+        if request.app[ACTIVE].active:
+            return web.json_response({"error": "End the conversation before changing its model."}, status=409)
+        try:
+            async with asyncio.timeout(90), aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as client:
+                token = await request.app[TOKENS].get_token(client)
+                headers = {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}
+                latest = await lookup_configured_agent(client, cfg, headers, include_version=True)
+                if latest is None:
+                    return web.json_response({"error": "Create the Agent before changing its model."}, status=404)
+                if latest.get("version") != body["version"]:
+                    return web.json_response({"error": "The Agent version changed. Reload the page before saving."}, status=409)
+                expected_version = latest["version"]
+                definition = model_definition(latest["definition"], body["model"], body.get("transcriptionModel"))
+                if definition != latest["definition"]:
+                    url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions"
+                    async with client.post(url, params={"api-version": cfg.api_version}, headers=headers,
+                                           json={"definition": definition, "metadata": latest.get("metadata") or {}},
+                                           allow_redirects=False) as response:
+                        if response.status not in {200, 201}:
+                            raise AgentPreparationError(
+                                f"Model change failed (HTTP {response.status}). The Agent/transcription model or audio settings may be unavailable in this project. Previous versions were not deleted.")
+                        published = await response.json()
+                        if not isinstance(published, dict) or not isinstance(published.get("version"), str):
+                            raise AgentPreparationError("A version may have been saved, but its number could not be verified. Reload before retrying.")
+                        expected_version = published["version"]
+                url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}:enable"
+                async with client.post(url, params={"api-version": cfg.api_version}, headers=headers,
+                                       allow_redirects=False) as response:
+                    if response.status != 204:
+                        raise AgentPreparationError("The model version was saved but could not be enabled. Retry setup before starting a call.")
+                result = await inspect_configured_agent(client, cfg, headers)
+                if (result.get("version") != expected_version or result.get("model") != body["model"]
+                        or ("transcriptionModel" in body and result.get("transcriptionModel") != body["transcriptionModel"])):
+                    raise AgentPreparationError("The saved settings changed or could not be verified. Reload before retrying.")
+                return web.json_response(result)
+        except (AuthenticationError, AgentPreparationError) as error:
+            LOGGER.warning("Agent model change failed (%s)", type(error).__name__)
+            return web.json_response({"error": str(error)}, status=502)
+        except (aiohttp.ClientError, TimeoutError, ValueError) as error:
+            LOGGER.warning("Agent model change failed (%s)", type(error).__name__)
+            return web.json_response({"error": "The model change could not be verified. Reload before retrying; a new version may have been saved."}, status=502)
+
+
+async def recreate_configured_agent(client, cfg, headers):
+    async with client.get(cfg.agent_url(), headers=headers, allow_redirects=False) as response:
+        if response.status == 200:
+            agent = await response.json()
+            latest = (agent.get("versions") or {}).get("latest") or {}
+            definition = latest.get("definition") or {}
+            demo = json.loads((ROOT / "personalized-agent.json").read_text())
+            # Also recognize the earlier demo versions published before ownership metadata.
+            owned = ((latest.get("metadata") or {}).get("sample") == "foundry_voice_webrtc"
+                     or (all(definition.get(key) == demo[key] for key in
+                             ("kind", "model_type", "structured_inputs"))
+                         and definition.get("greeting") in (
+                             demo["greeting"], {"type": "template", "text": "{{greeting_text}}"})
+                         and definition.get("instructions") in {
+                             demo["instructions"], demo["instructions"].partition("\n\nWEATHER LOOKUP")[0],
+                             demo["instructions"].partition("\n\nTURN FOCUS AND CAPABILITIES")[0],
+                             demo["instructions"].partition("\n\nAGENT IDENTITY")[0]}))
+            if not owned:
+                raise AgentPreparationError("The configured Agent is not recognized as this sample's demo Agent. It was not deleted.")
+        elif response.status != 404:
+            raise AgentPreparationError(f"Agent lookup failed (HTTP {response.status}). No Agent was deleted.")
+    await prepare_weather_toolbox(client, cfg, headers)
+    if response.status == 200:
+        async with client.delete(cfg.agent_url(), headers=headers, allow_redirects=False) as deleted:
+            if deleted.status not in {200, 204, 404}:
+                raise AgentPreparationError(f"Agent removal failed (HTTP {deleted.status}). No replacement was published.")
+        for _ in range(10):
+            async with client.get(cfg.agent_url(), headers=headers, allow_redirects=False) as check:
+                if check.status == 404:
+                    break
+                if check.status != 200:
+                    raise AgentPreparationError(f"Removal was requested but could not be verified (HTTP {check.status}). No replacement was published; use Retry setup & start to recover.")
+            await asyncio.sleep(0.5)
+        else:
+            raise AgentPreparationError("Removal was requested but the previous Agent is still visible. No replacement was published; wait and use Retry setup & start to recover.")
+    try:
+        result = await prepare_configured_agent(client, cfg, headers)
+    except AgentPreparationError as error:
+        raise AgentPreparationError(
+            f"The previous Agent was removed or already absent, but replacement preparation failed. "
+            f"Use Retry setup & start to recover without resetting again. {error}"
+        ) from error
+    except (aiohttp.ClientError, TimeoutError, ValueError, OSError) as error:
+        raise AgentPreparationError(
+            "The previous Agent was removed or already absent, but the replacement could not be verified. "
+            "Check Azure connectivity and use Retry setup & start to recover without resetting again."
+        ) from error
+    return {**result, "recreated": result["created"]}
+
+
+async def prepare_agent(request):
+    return await manage_agent(request)
+
+
+async def recreate_agent(request):
+    return await manage_agent(request, recreate=True)
+
+
+async def agent_status(request):
+    return await manage_agent(request, inspect=True)
+
+
+async def manage_agent(request, *, recreate=False, inspect=False):
+    if not inspect and not allowed_origin(request):
+        return web.json_response({"error": "Open the page on this server."}, status=403)
+    cfg = request.app[SETTINGS]
+    if not cfg.configured:
+        return web.json_response({"error": "Configure the Foundry project endpoint first. No existing Agent is required."}, status=503)
+    if recreate:
+        if not cfg.allow_agent_recreate:
+            return web.json_response({"error": "Agent recreation is disabled by the server."}, status=403)
+        try:
+            confirmation = await request.json()
+        except (ValueError, aiohttp.ContentTypeError):
+            return web.json_response({"error": "Confirm the configured Agent name before removal."}, status=400)
+        if confirmation != {"confirm_agent": cfg.agent}:
+            return web.json_response({"error": "Confirmation must exactly match the configured Agent name."}, status=400)
+    async with request.app[PREPARATION]:
+        if not inspect and request.app[ACTIVE].active:
+            return web.json_response({"error": "End the active conversation before preparing the Agent."}, status=409)
+        try:
+            async with asyncio.timeout(90), aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as client:
+                token = await request.app[TOKENS].get_token(client)
+                operation = inspect_configured_agent if inspect else (
+                    recreate_configured_agent if recreate else prepare_configured_agent)
+                result = await operation(
+                    client, cfg, {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features})
+                return web.json_response(result)
+        except (AuthenticationError, AgentPreparationError) as error:
+            LOGGER.warning("Agent preparation failed (%s)", type(error).__name__)
+            return web.json_response({"error": str(error)}, status=502)
+        except (aiohttp.ClientError, TimeoutError, ValueError, OSError) as error:
+            LOGGER.warning("Agent preparation failed (%s)", type(error).__name__)
+            message = ("Agent reset could not be verified. Removal may have occurred. Use Retry setup & start to recover without resetting again."
+                       if recreate else "Agent preparation failed. Check Azure connectivity and the server's demo definition, then retry.")
+            return web.json_response({"error": message}, status=502)
+
+
 async def asset(request):
     name = request.match_info.get("file", "index.html")
-    if name not in {"index.html", "app.js", "style.css", "pcm-audio.mjs", "pcm-capture.js"}:
+    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js"}:
         raise web.HTTPNotFound()
     return web.FileResponse(ROOT / "public" / name)
 
@@ -215,18 +787,22 @@ async def forward_browser(browser, upstream, transport):
             raise ValueError("Send JSON events; binary frames are not supported.")
 
 
-async def forward_upstream(upstream, browser, transport):
+async def forward_upstream(upstream, browser, transport, on_conversation=None):
+    announced = False
     async for message in upstream:
         if message.type == aiohttp.WSMsgType.TEXT:
             # WebRTC plays RTP; WebSocket mode needs base64 PCM audio deltas.
             frame = json.loads(message.data)
+            if not announced and frame.get("conversation_id") and on_conversation is not None:
+                await on_conversation(frame["conversation_id"])
+                announced = True
             if transport == "websocket" or frame.get("type") not in {"response.audio.delta", "response.output_audio.delta"}:
                 await browser.send_str(message.data)
 
 
-async def relay(browser, upstream, transport):
+async def relay(browser, upstream, transport, on_conversation=None):
     tasks = [asyncio.create_task(forward_browser(browser, upstream, transport)),
-             asyncio.create_task(forward_upstream(upstream, browser, transport))]
+             asyncio.create_task(forward_upstream(upstream, browser, transport, on_conversation))]
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -276,9 +852,9 @@ async def diagnose_voice_not_found(client, cfg, headers, transport):
                                       allow_redirects=False) as response:
                     if response.status == 200:
                         return ("The project's agents API is reachable, but the configured agent was not found "
-                                "(HTTP 404). Copy the saved voice agent's exact name into "
-                                "AZURE_VOICE_AGENT_NAME in .env and restart. Use its name, not a model "
-                                "deployment name or an agent ID from the classic Agents API.")
+                                "(HTTP 404). Open the demo and choose Create Agent & start to save a new "
+                                "demo Agent before connecting. To reuse a different existing Agent, set "
+                                "AZURE_VOICE_AGENT_NAME to its exact name in .env and restart.")
                     if response.status == 404:
                         return ("Both the agent lookup and the project's agents API returned HTTP 404. "
                                 "Copy the project endpoint from Foundry's project overview into "
@@ -347,16 +923,41 @@ async def bridge(request):
     # One active local call prevents accidental duplicate usage.
     if request.app[ACTIVE].active:
         raise web.HTTPTooManyRequests(text="A call is already active.")
+    if request.app[PREPARATION].locked():
+        raise web.HTTPConflict(text="Wait for Agent preparation to finish before connecting.")
     request.app[ACTIVE].active = True
     browser = web.WebSocketResponse(max_msg_size=MAX_FRAME, heartbeat=20)
     try:
         await browser.prepare(request)
+        structured = None
+        voice = request.query.get("voice", "")
+        if voice and voice not in HD_VOICES | NATIVE_VOICES:
+            raise ValueError("Choose a supported demo HD voice.")
+        if cfg.personalization_required and request.query.get("personalize") != "true":
+            raise ValueError("This Agent requires session personalization.")
+        if request.query.get("personalize") == "true":
+            message = await browser.receive(timeout=10)
+            if message.type != aiohttp.WSMsgType.TEXT:
+                raise ValueError("Expected session personalization before connecting.")
+            structured = personalization_header(json.loads(message.data))
         cfg.project_url()  # Validate before acquiring credentials.
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as client:
             token = await request.app[TOKENS].get_token(client)
             headers = {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}
+            if structured is not None:
+                headers["x-ms-voice-structured-inputs"] = structured
+            if voice:
+                headers["x-ms-voice-session-override"] = json.dumps({
+                    "audio": {"output": {"voice": voice, "voice_type":
+                        "azure-realtime-native" if voice in NATIVE_VOICES else "azure-standard"}}
+                })
             async with connect_voice(client, cfg, headers, transport) as upstream:
-                await relay(browser, upstream, transport)
+                async def announce_conversation(conversation):
+                    await browser.send_json({
+                        "type": "bridge.conversation", "conversationId": conversation,
+                        "downloadToken": conversation_download_token(request.app[DOWNLOAD_SECRET], cfg.agent, conversation),
+                    })
+                await relay(browser, upstream, transport, on_conversation=announce_conversation)
     except Exception as exc:
         # Never send auth exceptions, headers or tokens to the browser or logs.
         LOGGER.warning("Voice bridge failed (%s)", type(exc).__name__)
@@ -373,16 +974,26 @@ async def bridge(request):
 SETTINGS = web.AppKey("settings", Settings)
 ACTIVE = web.AppKey("active", CallState)
 TOKENS = web.AppKey("tokens", AzureTokenProvider)
+PREPARATION = web.AppKey("preparation", asyncio.Lock)
+DOWNLOAD_SECRET = web.AppKey("download_secret", bytes)
 
 
 def create_app(settings=None, token_provider=None):
     app = web.Application(middlewares=[security_headers], client_max_size=MAX_FRAME)
     app[SETTINGS] = settings or load_settings()
     app[TOKENS] = token_provider or AzureTokenProvider()
+    app[PREPARATION] = asyncio.Lock()
     app[ACTIVE] = CallState()
+    app[DOWNLOAD_SECRET] = secrets.token_bytes(32)
     app.router.add_get("/health", health)
     app.router.add_get("/api/config", public_config)
     app.router.add_get("/api/voice", bridge)
+    app.router.add_post("/api/agent/prepare", prepare_agent)
+    app.router.add_post("/api/agent/recreate", recreate_agent)
+    app.router.add_get("/api/agent", agent_status)
+    app.router.add_get("/api/agent/settings", agent_settings)
+    app.router.add_post("/api/agent/model", change_agent_model)
+    app.router.add_post("/api/conversation/download", download_conversation)
     app.router.add_get("/", asset)
     app.router.add_get("/{file}", asset)
     return app

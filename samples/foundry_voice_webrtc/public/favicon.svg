@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>First Voice</title>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#72956a"/>
+      <stop offset="1" stop-color="#264b37"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#background)"/>
+  <circle cx="25" cy="22" r="24" fill="#c6e69b" opacity=".15"/>
+  <path d="M16 29v6m8-17v28m8-34v40m8-34v28m8-17v6"
+        fill="none" stroke="#f9ffe8" stroke-width="5" stroke-linecap="round"/>
+</svg>

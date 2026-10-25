@@ -6,12 +6,18 @@ and extended with a browser UI, WebSocket audio, and WebRTC support.
 Both WebSocket and WebRTC transports are generally available (GA).
 This is a companion implementation, not code copied verbatim from the documentation.
 
-The app connects to an **existing saved Foundry voice agent**. It does not create,
-update, or delete agents. The agent retains its saved instructions, model, and
-voice configuration; the browser does not send a replacement `session.update`.
+The demo starts with **just a Foundry project; no existing Agent is needed**.
+Before the first conversation, it creates and saves a voice Agent from the
+included demo definition. Future visits and server restarts reuse that saved
+Agent under the same stable name. Existing Agent
+definitions are reused by default. An optional confirmed reset can delete and
+recreate only the configured sample Agent. The agent retains its saved instructions, model, and
+voice configuration by default; the browser does not send a replacement `session.update`.
+Optional session-start personalization and output-voice selection do not edit the saved Agent.
 
 Features include microphone and text input, spoken replies, live transcripts, mute,
-interruption, and end-call cleanup. The frontend uses plain HTML/CSS/JavaScript
+interruption, model/version controls, read-only Agent YAML, downloadable conversation
+logs with audio, and end-call cleanup. The frontend uses plain HTML/CSS/JavaScript
 and needs no build step. A Python backend keeps Azure credentials out of the browser.
 
 | Transport | Audio path | Requirements |
@@ -23,11 +29,14 @@ and needs no build step. A Python backend keeps Azure credentials out of the bro
 
 - Python 3.11 or later.
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) and an account with permission to invoke the agent.
-- A Foundry project endpoint and a saved voice agent created using the linked quickstart.
+- A Foundry project endpoint; an Agent name is optional. To create a missing Agent, the
+  backend identity needs permission to create Agent versions and enable Agents,
+  as well as access to the example managed model and voice.
 - Browser microphone permission and a microphone/headset.
 - A backend process allowed to reach Azure over HTTPS.
 
-For WebSocket audio, configure the saved agent for mono **PCM16 at 24 kHz**
+The bundled Agent already configures WebSocket audio. If reusing your own Agent,
+configure it for mono **PCM16 at 24 kHz**
 input/output, server-side turn detection with automatic responses, and input
 transcription if user transcripts are wanted. Test the agent in Foundry first.
 For WebRTC, ensure your browser and network allow ICE connectivity to Azure.
@@ -56,17 +65,178 @@ Set these values in this sample's own `.env` (not the parent samples directory):
 
 ```dotenv
 AZURE_AI_PROJECT_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT
-AZURE_VOICE_AGENT_NAME=my-first-voice-agent
 ```
 
-Use the saved agent's exact **name**, not a model deployment name or classic agent
-ID. This sample intentionally retains its own environment-variable names and
+Leave `AZURE_VOICE_AGENT_NAME` unset or blank to use
+`webrtc-personalized-hd-demo`. This stable default is used on every restart; the
+Agent itself is saved in Foundry, not in browser storage. Set the variable only
+to select a different name, either for a new demo Agent or your own existing
+Agent. Use its exact **name**, not a model deployment name or classic agent ID.
+This sample intentionally retains its own environment-variable names and
 dependencies, independently of the sibling SDK samples. Restart after editing
 configuration or source files.
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080), choose a transport, select
-**Start conversation**, and allow the microphone. Set `PORT` to another free port
-if needed. Use **End** to stop the microphone and connections.
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). The demo first checks for the
+saved Agent without creating or enabling anything:
+
+1. **No Agent yet:** select **Create Agent & start**. The backend prepares the
+   weather Toolbox, then creates, saves, and enables the Agent before requesting
+   microphone access.
+2. **Saved Agent found:** select **Start conversation** to reuse it. No new Agent
+   or version is created.
+3. **Next visit or restart:** the same project and stable name find the saved
+   Agent automatically; there is no setup to repeat.
+
+Choose either transport and allow the microphone when prompted. Set `PORT` to
+another free port if needed. Use **End** to stop the microphone and connections.
+
+The main conversation button checks the configured name and creates it from
+`personalized-agent.json` only when the Agent is absent and the project's Agents
+API is reachable. It then enables the Agent before requesting microphone access.
+There is no separate setup button. The Agent panel also provides model/version
+controls and read-only settings. No Agent
+name, definition, or Azure credential is accepted from the browser.
+
+The **Model** line reads the saved Agent's model, rather than assuming the demo
+default. Before creation it shows `gpt-realtime-2.1 (after setup)`; a failed lookup
+shows `Unavailable`. New demo Agents answer only the latest request, avoid
+repeating earlier capability lists or adding routine follow-up questions, and
+do not claim reminder or messaging tools that are not connected.
+When asked to introduce itself, the Agent identifies itself as **Foundry Voice
+Agent**, not ChatGPT, without repeating that identity in ordinary replies.
+The saved setup uses managed **gpt-realtime-2.1**, **mai-transcribe-2** input transcription,
+and the selected Azure Speech HD output voice. Azure semantic turn detection
+keeps the headset noise-reduction processing on the service-owned audio path;
+GPT Realtime's upstream-owned `server_vad` rejects that denoiser.
+The Agent speaks one brief acknowledgement, such as "Let me check that for
+you," before invoking the weather tool. The saved prompt makes it follow the
+session language policy and keeps the filler out of the final answer. This is
+model-generated speech from the Agent, not browser speech synthesis or an
+extra client response request. This explicit pre-tool prompt is used instead
+of relying on service `interim_response` support for Toolbox calls.
+
+An existing voice Agent is reused without changing its instructions, voice,
+denoise settings, or versions. A non-voice Agent, or an Agent missing required
+demo inputs when `PERSONALIZATION_REQUIRED=true`, fails visibly instead of being
+overwritten. A lookup authorization failure is never treated as a missing Agent.
+Agent preparation is serialized within the single-replica demo; do not scale this
+sample without adding cross-replica creation coordination.
+
+### Models, versions, and Agent YAML
+
+The **Version** line shows the saved Agent's current version. End the call, choose
+`gpt-realtime-2.1`, `azure-realtime`, or `gpt-5.4`, then select **Save new version**.
+This publishes and enables a new version without deleting previous versions.
+Instructions, tools, metadata, and other configuration are preserved except for
+explicit transcription selections, turn-detection, and output-voice compatibility
+changes. A stale version, active call, or publication failure is reported rather
+than silently overwriting the saved Agent. These guards coordinate only this
+single backend replica, not independent Foundry editors.
+
+Selecting a model previews compatible voices immediately; **Model** and **Version**
+continue to report the saved configuration until publication succeeds.
+`azure-realtime` uses native voice `ava` by default. Switching from native output
+to a GPT model selects `en-US-Tyler:DragonHDLatestNeural`. Other supported HD
+settings are preserved. Model and voice availability depend on the project.
+
+Use **Transcription model** to select input speech recognition independently of
+the Agent model, then select **Save new version**. **Transcription** shows the
+actual saved model and updates only after a successful save. A transcription-only
+change preserves the existing prompt, AI greeting, tools, output voice, language,
+and turn detection. Switching the Agent model also retains the saved
+transcription choice. Controls are disabled during calls and publication.
+
+New Agents default to **`mai-transcribe-2`**. Existing Agents retain their saved
+choice until explicitly changed. The selector offers these exact IDs:
+`azure-speech`, `azure-speech-streaming`, `azure-llm-speech`, `mai-transcribe`,
+`mai-transcribe-2`, `mai-transcribe-2-streaming`, `gpt-live-transcribe`,
+`gpt-realtime-whisper`, `gpt-transcribe`, `gpt-4o-transcribe`,
+`gpt-4o-mini-transcribe`, `gpt-4o-transcribe-diarize`, and `whisper-1`.
+Availability and compatibility depend on the project and Agent model; listing
+an ID does not guarantee that every combination is supported. Unsupported
+settings fail visibly without substituting another transcription model.
+Publication alone does not prove runtime availability: session startup may still
+reject a configuration. In the test project, `mai-transcribe-2` transcribed real
+input audio with all three Agent models, while `azure-llm-speech` was rejected
+at startup with `invalid_value` for `session.audio.input.transcription.model`.
+The other listed IDs have allowlist/versioning coverage, not exhaustive live
+compatibility verification.
+
+**Show Agent settings** opens read-only YAML for the saved name, version, and
+definition. Known credential fields are redacted. It is not a YAML editor, and
+editing the bundled JSON does not automatically update an existing Agent.
+Anyone with access to the demo can view these settings and publish a model
+version using the backend identity; restrict access outside a controlled demo.
+
+Creation uses the current backend identity (Azure CLI locally, managed identity
+on ACA). It needs read/create permission for Toolboxes as well as Agent
+read/create/enable permission. An invoke-only identity is not sufficient for this UI workflow. The
+configured name is the only creation target, but anyone with access to the demo
+can trigger preparation; use Entra sign-in for deployments outside a controlled demo.
+
+### Weather through Foundry Toolbox
+
+Weather is part of the normal Agent setup, not a browser-side function or a
+separate weather API. Before publishing a new demo Agent, the backend checks for
+the **weather** Toolbox in the same Foundry project:
+
+- If present, it validates that the latest immutable version contains a
+  `web_search` tool and pins that exact version in the Agent.
+- If absent, it first verifies the Toolboxes API, then publishes
+  [`weather-toolbox.json`](weather-toolbox.json) and attaches the returned version.
+- Permission errors, incompatible Toolboxes, or failed creation stop setup
+  visibly; an existing Toolbox is never overwritten.
+
+The Agent uses web search through Foundry Toolbox for current conditions and
+forecasts. It asks for a location when needed and must ground its reply in tool
+results rather than inventing weather. Try **"What is the weather in Seattle
+today?"** after starting a conversation. These are web-search results, not a
+dedicated meteorological-feed SLA.
+
+The Toolbox and Agent stay saved for future sessions; repeated setup does not
+publish extra versions. Reset checks the weather dependency before deleting an
+Agent and does not delete the shared Toolbox. If Agent publication fails after
+Toolbox creation, retry setup to reuse that Toolbox.
+
+Existing Agent definitions remain unchanged. To add weather to an older demo
+Agent, explicitly use **Advanced → Reset Agent**, or choose a new Agent name.
+Reset removes previous Agent versions after confirmation. The UI advertises
+weather for new demo setup or when the saved Agent has the weather reference.
+If publishing `personalized-agent.json` manually, provision the referenced
+Toolbox first; automatic setup resolves the actual immutable version for you.
+
+### Remove, recreate, and keep the Agent for next use
+
+Set `ALLOW_AGENT_RECREATE=true` to enable **Reset Agent** inside the collapsed
+**Advanced** section. This is disabled by default. End the current call, expand
+Advanced, click the button, and type the exact configured Agent name in the
+confirmation dialog. Cancelling or entering a
+different name makes no change.
+
+The server checks Origin, the server-side opt-in, the confirmation, and that the
+configured Agent is recognized as this sample's Agent. It then removes that Agent
+and its saved versions, verifies removal, creates a fresh Agent from the bundled
+definition under the **same configured name**, and enables it. Older demo versions
+are recognized by their template; newly created versions carry sample ownership
+metadata. Unrelated Agents cannot be reset through this action.
+
+The fresh Agent remains saved in Foundry. Reloading the page, restarting the
+backend, or returning later reuses it automatically through the configured
+project/name; there is no browser-local Agent selection or temporary Agent to
+remember. This action does not save user context or microphone settings.
+
+Removal is permanent and can affect other clients using that Agent. Replacement
+is not transactional: if creation fails after removal, the UI reports the partial
+failure; **Retry setup & start** recovers without deleting anything again. Clearing the
+page transcript is unrelated to Agent removal, and this UI does not promise to
+delete persisted conversation/audio records.
+
+The backend identity needs Agent deletion permission in addition to creation and
+enable permissions. Keep reset disabled on public/shared deployments unless that
+destructive access is explicitly intended. With anonymous access, **any visitor
+can reset the configured demo Agent** after confirming its name; the dialog is an
+accident-prevention measure, not authentication. Use Entra sign-in for restricted
+access.
 
 For either transport, type in **Message your agent** and press **Enter** or
 **Send** once connected. Submitted text appears in the conversation and requests
@@ -76,10 +246,136 @@ the Send button waits while you are speaking or the agent is generating a reply.
 Mute the microphone to converse by text without spoken replies to typed messages.
 Session startup still requires microphone permission, even if you only plan to type.
 
+Spoken turns reserve a **You** bubble when speech starts, showing **Listening...**
+and then **Transcribing...** until text arrives. Azure Realtime can start its
+reply before input transcription finishes; updating the reserved bubble keeps
+the question above its answer rather than sorting by text arrival time. Partial
+user transcripts stream into the same bubble. Transcription failures or a call
+ending before any transcript arrives are shown explicitly.
+
 Authentication uses `AzureCliCredential` and the scope
 `https://ai.azure.com/.default`. Run the server as the Windows/OS user who ran
 `az login`. No resource API key or application client secret is used.
 See the [Foundry authentication matrix](https://learn.microsoft.com/en-us/azure/foundry/concepts/authentication-authorization-foundry).
+
+## Session context, greeting language, and English-only mode
+
+For this example, leave `AZURE_VOICE_AGENT_NAME` blank for the default name, or
+choose a dedicated demo name. Select **Create Agent & start** if no Agent exists.
+It is created using
+[`personalized-agent.json`](personalized-agent.json) as its **definition**.
+You can also publish that definition separately. Choose a managed model supported
+by your project in the JSON if the example model is unavailable. Changing the
+JSON does not update existing Agents; use a new name or explicitly publish a
+version. The UI's model action changes the model, not the saved instructions.
+
+Expand **Session personalization**, enable **Supply context before the greeting**,
+and enter synthetic data such as display name `Alex` and context
+`Interested in beginner hiking routes`. The browser suggests English or Spanish
+from its language setting; you can override it before connecting.
+
+**English-only instructions** are enabled by default. Even with Spanish selected,
+the AI-generated greeting and spoken/written replies are instructed to use English.
+The greeting uses the supplied display name when present, or no name when absent;
+its wording can vary. For non-English requests, the Agent is instructed to ask
+in English to continue in English, without fulfilling or translating the request.
+Unclear audio should prompt repetition rather than an assumed language.
+Uncheck English-only to demonstrate a Spanish greeting and default replies.
+
+The example declares string `structured_inputs`: `display_name`, `user_context`,
+`client_language`, `language_policy`, and `greeting_text`. The backend constructs
+the language policy from validated selections, rather than accepting arbitrary
+browser instructions. The saved instructions reference the name, context, and
+policy using Handlebars before the greeting is generated.
+
+The saved `llm_generated` greeting uses this prompt:
+
+> Give a brief, friendly greeting. Use the supplied display name if present; otherwise greet without a name. Follow the session language policy. Do not invent personal details.
+
+Greeting tool calls are disabled. The backend continues supplying `greeting_text`
+for compatibility with older saved Agents using a template greeting; the new
+AI-generated greeting does not use that fixed text. Existing Agents keep their
+saved greeting unless explicitly updated or reset.
+
+The browser sends a bounded initialization frame over its local socket **before**
+SDP or audio. The backend validates it and sends ASCII JSON in
+`x-ms-voice-structured-inputs` when opening the Azure connection. This supplies
+context before greeting generation, without a racing user message or
+`session.update`. Context is not placed in URLs, saved in browser storage, or
+logged by this app. It may be persisted in Azure because `store=true`.
+
+Context is untrusted personalization, not authentication or authorization.
+The instructions explicitly reject embedded instructions and identity claims.
+Do not supply real personal or sensitive information. All settings are frozen
+until the call ends, and each new call supplies its own values.
+
+The example's Azure Speech recognition language is `en-US`; this is separate from
+the greeting/response policy. For Spanish microphone recognition, configure a
+matching saved Agent recognition language or supported multilingual recognition.
+The English-only instruction is behavioral guidance, not a guarantee that
+non-English input cannot be submitted or recognized.
+
+The example enables server-side input denoising with
+`audio.input.noise_reduction: {"type": "azure_deep_noise_suppression_headset"}`.
+To try personal noise suppression instead, set its type to
+`azure_personal_noise_suppression` in the saved Agent definition. These are
+alternative modes, not stacked filters. The browser also requests its normal
+microphone noise suppression. This sample does not set `detection_input` or
+`turn_detection_only`; end-to-end support for those fields is not established.
+
+Leave personalization off for existing Agents without these declared inputs.
+Preparation detects the example's declared inputs and automatically enables
+personalization for it.
+Set `PERSONALIZATION_REQUIRED=true` in `.env` to enable and require it automatically
+for this Agent. Keep this unset for saved Agents without structured inputs.
+Missing input or unsupported template behavior should surface as a service error;
+there is no silent fallback to a greeting without context.
+
+### Output voice
+
+The voice list displays full service IDs, with
+`en-US-Tyler:DragonHDLatestNeural` selected by default. For GPT models, choose
+an HD voice before connecting, or choose **Saved Agent voice** to preserve the stored setting. The backend
+allowlists these choices and sends an `x-ms-voice-session-override` containing
+`audio.output.voice` and `voice_type: "azure-standard"` at connection time
+(the HD model is selected by the voice name, not a separate `azure-hd` type).
+This applies to the greeting and subsequent output without editing the Agent.
+
+The configured HD voices are:
+
+- `en-US-Tessa:DragonHDLatestNeural`
+- `en-US-Tyler:DragonHDLatestNeural`
+- `en-US-Paige:DragonHDLatestNeural`
+- `en-US-Colin:DragonHDLatestNeural`
+- `en-US-Brian:DragonHDLatestNeural`
+- `en-US-Emma:DragonHDLatestNeural`
+- `en-IN-Diya:DragonHDLatestNeural`
+- `zh-CN-Xiaoqi:DragonHDFlashLatestNeural`
+- `zh-CN-Xiaoke:DragonHDFlashLatestNeural`
+
+Voice availability must be checked for your project.
+The example Agent defaults to Tyler HD. Unsupported selections fail visibly;
+the sample does not substitute another voice. An English voice identifier alone
+does not enforce English-only conversation.
+
+HD voice overrides require an Agent/model that accepts Azure Speech output, such
+as the example managed `gpt-realtime-2.1` pipeline. An `azure-realtime` Agent accepts
+only `azure-realtime-native` voices; changing the override type cannot make an
+HD Speech voice compatible. Its separate native list offers `ava`, `andrew`,
+`emma`, `clara`, `liam`, `natasha`, `rayn`, `alvaro`, `dalia`, and `jorge`.
+The backend sends `voice_type: "azure-realtime-native"` for those selections.
+Session voice selection never publishes an Agent version. Chinese HD voice
+selection does not change the English/Spanish language controls or recognition
+language; configure matching language support separately.
+
+### Manual checks
+
+For both transports, check English-only with Spanish preference, Spanish greeting
+with English-only disabled, a context-aware follow-up, and a new call with empty
+context. Try non-English text/audio and a request to switch languages in
+English-only mode. Check the greeting and later replies for each available HD
+voice. Offline tests verify initialization order and payload validation, not
+availability of every model/voice combination in your Azure project.
 
 ## Deploy to Azure Container Apps
 
@@ -98,10 +394,10 @@ az login
   -ServiceManagementReference YOUR-SERVICE-TREE-ID
 ```
 
-The script reads `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_VOICE_AGENT_NAME`, and the
+The script reads `AZURE_AI_PROJECT_ENDPOINT`, optional `AZURE_VOICE_AGENT_NAME`, and the
 non-secret protocol settings from the existing `.env`. It deploys the Bicep
 infrastructure, cloud-builds the image in ACR, grants the managed identity
-`Azure AI Developer` on the matching Foundry resource, configures single-tenant
+`Foundry User` on the matching Foundry resource (needed for Agent preparation), configures single-tenant
 Microsoft Entra sign-in, and writes the HTTPS origin to `PUBLIC_ORIGIN` in `.env`.
 The Service Tree ID is required by Microsoft tenant governance. If resource
 discovery is unavailable, pass `-FoundryResourceId` with the Foundry resource's
@@ -132,9 +428,27 @@ conversation/audio persistence where supported. The diagnostic check below uses
 the same setting and can create a saved session. Azure retention/access policies
 apply; clearing browser transcripts does not delete Azure-stored data.
 
-The local app does not save audio or transcripts to disk. Transcripts remain on
-the page until cleared or refreshed. Credentials remain server-side and are not
-printed. Do not commit `.env`, access tokens, recordings, or logs. Use only
+The page prominently warns **Audio is saved by default** before starting.
+After **End**, select **Download log + audio** to export a ZIP containing
+`conversation.json` (conversation metadata and all item pages) and `audio.wav`
+(the merged stereo caller/Agent recording). This uses Azure-persisted audio for
+both transports, not a separate browser microphone recording. Azure may need
+time to finalize a conversation; download failures are shown explicitly and
+can be retried.
+
+The backend issues a signed download capability only for a conversation observed
+on that client's voice connection. Treat it as sensitive: anyone holding it can
+download that conversation. It expires after 24 hours or a backend restart.
+Only the latest call reference is retained in browser memory; reloading the page
+loses it. Exports are limited to 16 MiB of log data and 128 MiB of audio. The ZIP
+uses a temporary spooled file (larger archives may spill to temporary disk),
+which is closed after delivery or failure; this is not a retained local archive.
+
+Transcripts remain on the page until cleared or refreshed. Clearing transcripts
+or deleting an Agent does not promise deletion of Azure recordings. Exported
+logs and recordings can contain sensitive context, tool results, and speech.
+Credentials remain server-side and are not printed.
+Do not commit `.env`, access tokens, recordings, or logs. Use only
 short-lived, limited TURN credentials: ICE configuration is sent to the browser.
 
 ## Check the Azure connection
