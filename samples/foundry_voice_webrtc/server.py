@@ -417,7 +417,7 @@ async def security_headers(request, handler):
         "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer", "Permissions-Policy": "microphone=(self)",
         "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; "
-                                   "connect-src 'self'; media-src 'self' blob:; "
+                                   "connect-src 'self' https://api.open-meteo.com; media-src 'self' blob:; "
                                    "frame-ancestors 'none'; base-uri 'none'",
     })
     return response
@@ -787,7 +787,7 @@ async def manage_agent(request, *, recreate=False, inspect=False):
 
 async def asset(request):
     name = request.match_info.get("file", "index.html")
-    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs"}:
+    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs", "weather.mjs"}:
         raise web.HTTPNotFound()
     return web.FileResponse(ROOT / "public" / name)
 

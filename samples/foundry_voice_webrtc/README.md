@@ -23,6 +23,17 @@ interruption with authoritative retained history, model/version controls, read-o
 logs with audio, and end-call cleanup. The frontend uses plain HTML/CSS/JavaScript
 and needs no build step. A Python backend keeps Azure credentials out of the browser.
 
+The browser also displays an animated Seattle landscape using Open-Meteo current
+weather, refreshed every 15 minutes. Cloud cover, day/night, precipitation, and
+wind drive the sky, rain/snow, and drifting leaves; no location permission or
+API key is required. This is a stylized landscape, not a live camera feed.
+The weather request goes directly from the browser to `api.open-meteo.com`
+(Seattle's fixed coordinates only; no agent or conversation data).
+The timestamp is Seattle local time. Failed updates are shown explicitly;
+the last successful scenery is retained, or the neutral background remains if
+no weather was loaded. Use **Pause scenery** to stop movement. Reduced-motion
+preferences pause it automatically, and hidden tabs stop rendering.
+
 | Transport | Audio path | Requirements |
 | --- | --- | --- |
 | WebSocket (default) | Browser → local backend → Azure; mono PCM16 at 24 kHz | Outbound secure WebSocket/HTTPS; no ICE |
