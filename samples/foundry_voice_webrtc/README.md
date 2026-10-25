@@ -8,10 +8,13 @@ This is a companion implementation, not code copied verbatim from the documentat
 
 The app connects to an **existing saved Foundry voice agent**. It does not create,
 update, or delete agents. The agent retains its saved instructions, model, and
-voice configuration; the browser does not send a replacement `session.update`.
+voice configuration. The backend sends a narrow `session.update` for the **active
+session only** to enable automatic interruption truncation and retained-item
+events. It never writes the saved cloud agent.
 
 Features include microphone and text input, spoken replies, live transcripts, mute,
-interruption, and end-call cleanup. The frontend uses plain HTML/CSS/JavaScript
+interruption with authoritative retained conversation history, and end-call cleanup.
+The frontend uses plain HTML/CSS/JavaScript
 and needs no build step. A Python backend keeps Azure credentials out of the browser.
 
 | Transport | Audio path | Requirements |
@@ -38,7 +41,7 @@ Run from the repository root in PowerShell. Virtual-environment activation is no
 required, avoiding PowerShell script execution-policy issues:
 
 ```powershell
-cd VoiceAgent\samples\foundry_voice_webrtc
+cd .\samples\foundry_voice_webrtc
 az login
 # If necessary: az login --tenant YOUR-TENANT-ID
 # If necessary: az account set --subscription YOUR-SUBSCRIPTION-ID
@@ -75,6 +78,40 @@ Messages are limited to 4,000 characters;
 the Send button waits while you are speaking or the agent is generating a reply.
 Mute the microphone to converse by text without spoken replies to typed messages.
 Session startup still requires microphone permission, even if you only plan to type.
+
+## Try an interruption
+
+1. Start the server with `.\.venv\Scripts\python server.py`, open
+   `http://127.0.0.1:8080`, choose WebSocket or WebRTC, and start a conversation.
+   Wait for **Connected**. Both text and microphone input wait for Azure to
+   acknowledge the truncation settings; WebRTC also waits for the media connection.
+2. **Speak**: "Describe three places to visit, with a long explanation of each."
+   Typed messages request text-only output, so use the microphone for this repro.
+3. While the agent is speaking, say "Stop. Just tell me the first place."
+   The same assistant card changes to **Agent - retained after interruption**.
+   Its text is replaced with the service's post-truncation text, including any
+   configured interruption suffix. No second copy or unheard full answer remains.
+4. Wait for the response to finish. Late transcript and response-completion events
+   must not restore the removed suffix. Interrupt another spoken reply very early
+   to exercise an empty cut: the old text disappears and the card says no text was
+   retained. Repeat with the other transport.
+
+Streaming replies are labeled **live draft**, not confirmed retained context.
+After a truncation, the full item is authoritative even when it contains no text.
+If Azure omits the item, the previous text is immediately hidden while
+`conversation.item.retrieve` runs. Failure or a 10-second timeout leaves an
+explicit **retained history unavailable** card and an error, never the full answer.
+Retrievals for the same item are serialized; a snapshot overtaken by another cut
+is discarded and retrieved again. After a timeout, ambiguous late replies cannot
+be used for a later retry: restart the session or wait for an enriched truncation.
+**Clear** clears the page, not Azure context, and late events for cleared turns
+remain hidden. Starting again creates fresh per-session history state.
+
+This is **interrupted-output truncation**, not context-window/token truncation.
+Auto truncation assumes real-time playback; local buffering, latency, or a paused
+speaker can differ from what the user actually heard. The sample displays the
+service's authoritative retained context rather than estimating text from
+`audio_end_ms` or slicing characters locally.
 
 Authentication uses `AzureCliCredential` and the scope
 `https://ai.azure.com/.default`. Run the server as the Windows/OS user who ran
@@ -143,8 +180,9 @@ short-lived, limited TURN credentials: ICE configuration is sent to the browser.
 .\.venv\Scripts\python check_websocket.py
 ```
 
-This opens a short-lived WebSocket session using Azure CLI authentication, waits
-for `session.updated`, and closes. It sends no microphone audio or user message.
+This opens a short-lived WebSocket session using Azure CLI authentication, applies
+the same active-session truncation update as the app, waits for its acknowledgment,
+and closes. It sends no microphone audio or user message.
 It prints sanitized status information, not tokens or session contents. A saved
 agent may still generate a greeting. Success establishes session readiness, not
 an end-to-end spoken conversation.
@@ -181,8 +219,61 @@ the availability status of the WebRTC transport.
   same backend socket, selecting `output_modalities: ["text"]` for typed turns.
   The bridge translates this to `modalities: ["text"]` for the WebRTC protocol.
   The backend validates text and allows only this text-only response override,
-  not other response or session configuration changes. WebRTC uses its socket for events
+  not other browser-controlled response or session configuration changes. Read-only
+  `conversation.item.retrieve` requests are also validated and relayed.
+  WebRTC uses its socket for events
   and WebRTC for audio, not the data channel for text.
+
+### Active-session truncation configuration
+
+The first `session.updated` supplies the applied saved-agent settings. The bridge
+preserves the reported VAD type/options and the **whole existing include list**,
+adds `conversation.item.truncated.item` without duplicates, and sets
+`auto_truncate: true` and its prerequisite `interrupt_response: true`.
+It does not change instructions, model, voice, tools, formats, or saved agents.
+A disabled/missing VAD or disabled automatic responses is reported as a setup
+error rather than silently replacing the saved turn-detection mode.
+
+For the [stable realtime session schema](https://learn.microsoft.com/javascript/api/@azure/ai-projects/voiceagentsessionupdateconfig),
+the update has this shape (the shown VAD type is illustrative; the actual saved
+type and its other options are preserved):
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "type": "realtime",
+    "include": ["conversation.item.truncated.item"],
+    "audio": {
+      "input": {
+        "turn_detection": {
+          "type": "azure_semantic_vad",
+          "auto_truncate": true,
+          "interrupt_response": true
+        }
+      }
+    }
+  }
+}
+```
+
+For the older [Voice Live session shape](https://learn.microsoft.com/azure/ai-services/speech-service/how-to-voice-live-auto-truncation)
+used by WebRTC, `turn_detection` is directly under `session`, without the stable
+`type`/`audio` wrapper. The bridge follows the shape Azure actually reports rather
+than inferring it solely from the transport or API version.
+`session.include` is top-level in both shapes; sending it replaces the whole list.
+The retained-item selector is opt-in and supported by preview, dated GA, and v1
+APIs. Startup fails explicitly if the endpoint does not acknowledge both flags
+and all requested selectors within 30 seconds.
+
+`conversation.item.truncated.item`, when present, is the full **post-truncation**
+item (equivalent to retrieval, with base64 audio omitted), not just the affected
+content part. Text can be in `content[].text` or `content[].transcript`.
+The UI replaces the matching `item_id` in place and locks it against subsequent
+full-answer events, including modern/legacy transcript events, output items, and
+`response.done`. A later, shorter truncation can update it again. Multi-item
+responses keep separate item histories. The same handling also applies to
+client-issued truncation events, although this UI does not issue manual cuts.
 
 This sample uses the Foundry voice-agent WebRTC signaling protocol described
 above, not the separate Azure OpenAI `/openai/v1/realtime/calls` flow.
@@ -202,6 +293,8 @@ above, not the separate Azure OpenAI `/openai/v1/realtime/calls` flow.
 | Slow first request after inactivity | ACA uses `minReplicas=0` and may cold-start. Subsequent warm requests are faster. Keeping one replica warm avoids scale-to-zero cold starts but adds ongoing compute cost. |
 | Silent output | Check the output device and enable speaker audio if autoplay is blocked. |
 | No user transcript / automatic reply | Enable transcription / server-side turn detection in Foundry. |
+| Truncation settings not acknowledged | Check this agent endpoint/API version supports the reported session shape, `auto_truncate`, `interrupt_response`, and the include selector. The sample does not enable input without acknowledgment. |
+| Retained history unavailable | The full answer is hidden. Check the surfaced retrieval error; restart after a timeout. |
 
 ## Validation and limitations
 
@@ -210,16 +303,20 @@ Run offline validation from this directory (Node.js is needed only for JavaScrip
 ```powershell
 .\.venv\Scripts\python -m unittest discover -v
 .\.venv\Scripts\python -m compileall -q server.py auth.py check_websocket.py
-node --check public/app.js
-node --check public/pcm-audio.mjs
-node --check public/pcm-capture.js
-node --test test_text_input.mjs
+node --check public\app.js
+node --check public\pcm-audio.mjs
+node --check public\pcm-capture.js
+node --check public\retained-history.mjs
+node --test test_text_input.mjs test_retained_history.mjs
 ```
 
-The included regression test checks `store=true` and transport selection in both
-connection URLs. Compilation/syntax checks do not prove Azure connectivity.
-An end-to-end Azure spoken turn was **not verified when this sample was added**;
-run the connection check and a microphone conversation in your own project.
+Offline regressions cover session update/acknowledgment and preserved settings,
+both transports' input readiness, text input, per-item retained history, empty and
+repeated cuts, delayed full-answer events, retrieval/error/timeout races, and
+clear/reconnect behavior. They also check `store=true` and transport selection.
+Synthetic/offline UI verification is not an Azure audio test. An end-to-end Azure
+spoken interruption is **not verified by these tests**; run the connection check
+and the manual microphone repro in your own project.
 
 This is a **local-development sample**, not a production service. It binds to
 loopback, checks browser Origin/Host, limits frames, and allows one active call.

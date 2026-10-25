@@ -5,7 +5,7 @@ import unittest
 
 import aiohttp
 
-from server import forward_browser, validate_client_frame
+from server import SessionConfiguration, forward_browser, validate_client_frame
 
 
 def text_frame(text="Hello", **fields):
@@ -107,7 +107,7 @@ class TextRelayTests(unittest.IsolatedAsyncioTestCase):
                     self.sent.append(frame)
 
             upstream = Upstream()
-            await forward_browser(browser(), upstream, transport)
+            await forward_browser(browser(), upstream, transport, SessionConfiguration(ready=True))
             expected = frames[:-1] + [{"type": "response.create", "response": {
                 "modalities" if transport == "webrtc" else "output_modalities": ["text"],
             }}]

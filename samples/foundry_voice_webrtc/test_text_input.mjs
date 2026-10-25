@@ -3,6 +3,7 @@ import { webcrypto } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { RetainedHistory } from './public/retained-history.mjs';
 
 const source = await readFile(new URL('./public/app.js', import.meta.url), 'utf8');
 
@@ -10,9 +11,10 @@ async function setup(transport, overrides = {}) {
   const elements = new Map();
   const makeElement = () => ({
     value: '', disabled: true, hidden: true, textContent: '', children: [],
-    append(...children) { this.children.push(...children); },
+    append(...children) { this.children.push(...children); children.forEach(child => { child.parent = this; }); },
     replaceChildren(...children) { this.children = children; },
-    remove() {}, setAttribute() {}, pause() {},
+    remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); },
+    setAttribute() {}, pause() {},
   });
   const element = id => {
     if (!elements.has(id)) elements.set(id, makeElement());
@@ -21,6 +23,7 @@ async function setup(transport, overrides = {}) {
   const sent = [];
   const session = {
     transport, ready: false, ws: { readyState: 1, send: frame => sent.push(JSON.parse(frame)), close() {} },
+    peer: transport === 'webrtc' ? {connectionState:'connected', close() {}} : undefined,
     abort: new AbortController(),
   };
   const context = {
@@ -30,14 +33,17 @@ async function setup(transport, overrides = {}) {
     fetch: async () => ({ ok: true, json: async () => ({ configured: true }) }),
     clearTimeout() {}, clearInterval() {}, setInterval: () => 1,
     validateAudioSession() {},
+    RetainedHistory,
     session,
     ...overrides,
   };
   // Run the actual UI code with a minimal DOM, without browser audio imports.
   await vm.runInNewContext(`(async () => {
-    ${source.replace(/^import .*;\r?\n/, '')}
+    ${source.replace(/^import .*;\r?\n/gm, '')}
     call = session;
-    return {markReady, handleEvent, updateTextInput, stop, connectWebRtc};
+    session.history = createHistory(session);
+    return {markReady, handleEvent, updateTextInput, stop, connectWebRtc, start,
+      reconnect: () => { call = session; session.history = createHistory(session); }};
   })()`, context).then(api => context.api = api);
   return { ...context.api, element, session, sent };
 }
@@ -48,7 +54,7 @@ for (const transport of ['websocket', 'webrtc']) {
     ui.element('text-input').value = '  Hello <world>  ';
     ui.updateTextInput();
     assert.equal(ui.element('send-text').disabled, true);
-    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'bridge.ready'});
     assert.equal(ui.element('text-input').disabled, false);
     assert.equal(ui.element('send-text').disabled, false);
     let prevented = false;
@@ -84,7 +90,7 @@ for (const transport of ['websocket', 'webrtc']) {
 
   test(`${transport}: rejects blank, oversized, speaking and disconnected submissions`, async () => {
     const ui = await setup(transport);
-    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'bridge.ready'});
     for (const text of [' ', 'x'.repeat(4001)]) {
       ui.element('text-input').value = text;
       ui.element('text-form').onsubmit({ preventDefault() {} });
@@ -105,7 +111,7 @@ for (const transport of ['websocket', 'webrtc']) {
 
   test(`${transport}: failed responses surface errors and allow retry`, async () => {
     const ui = await setup(transport);
-    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'bridge.ready'});
     ui.element('text-input').value = 'Hello';
     await ui.handleEvent(ui.session, { type: 'response.created', response: { id: 'reply' } });
     assert.equal(ui.element('send-text').disabled, true);
@@ -116,7 +122,7 @@ for (const transport of ['websocket', 'webrtc']) {
 
   test(`${transport}: send failures preserve the draft and disable the composer`, async () => {
     const ui = await setup(transport);
-    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'bridge.ready'});
     ui.element('text-input').value = 'Keep my draft';
     ui.session.ws.send = () => { throw new Error('Socket send failed'); };
     ui.element('text-form').onsubmit({ preventDefault() {} });
@@ -203,3 +209,60 @@ test('WebRTC reports an ICE timeout and does not send an incomplete offer', asyn
   assert.equal(ui.session.ws.sent.length, 0);
   ui.stop();
 });
+
+for (const transport of ['websocket', 'webrtc']) {
+  test(`${transport}: input waits for bridge configuration and media readiness`, async () => {
+    const ui = await setup(transport);
+    const track = {enabled:false};
+    ui.session.mic = {getAudioTracks:() => [track], getTracks:() => []};
+    if (ui.session.peer) ui.session.peer.connectionState = 'connecting';
+    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'session.updated', session:{}});
+    assert.equal(ui.session.ready, false);
+    assert.equal(track.enabled, false);
+    await ui.handleEvent(ui.session, {type:'bridge.ready'});
+    assert.equal(ui.session.ready, transport === 'websocket');
+    if (ui.session.peer) {
+      ui.session.peer.connectionState = 'connected';
+      ui.markReady(ui.session);
+    }
+    assert.equal(track.enabled, true);
+    assert.equal(ui.element('text-input').disabled, false);
+    ui.stop();
+  });
+
+  test(`${transport}: rendered retained history replaces drafts, clears, and isolates reconnects`, async () => {
+    const ui = await setup(transport);
+    await ui.handleEvent(ui.session, {type:'response.audio_transcript.delta', item_id:'answer', delta:'Heard UNHEARD'});
+    const box = ui.element('transcript').children[0];
+    await ui.handleEvent(ui.session, {type:'conversation.item.truncated', item_id:'answer', content_index:0, audio_end_ms:100,
+      item:{id:'answer', type:'message', role:'assistant', content:[{type:'audio', transcript:'Heard'}]}});
+    await ui.handleEvent(ui.session, {type:'response.output_audio_transcript.done', item_id:'answer', transcript:'Heard UNHEARD'});
+    assert.equal(ui.element('transcript').children.length, 1);
+    assert.equal(box.children[1].textContent, 'Heard');
+    assert.match(box.children[0].textContent, /retained after interruption/);
+    ui.element('clear').onclick();
+    await ui.handleEvent(ui.session, {type:'response.text.done', item_id:'answer', text:'Full'});
+    assert.equal(ui.element('transcript').children.length, 0);
+    ui.stop();
+    await ui.handleEvent(ui.session, {type:'response.text.done', item_id:'answer', text:'Old session'});
+    assert.equal(ui.element('transcript').children.length, 0);
+    ui.reconnect();
+    await ui.handleEvent(ui.session, {type:'response.text.done', item_id:'answer', text:'New session'});
+    assert.equal(ui.element('transcript').children[0].children[1].textContent, 'New session');
+    ui.stop();
+  });
+
+  test(`${transport}: missing-item retrieval uses the socket and an empty result clears the card`, async () => {
+    const ui = await setup(transport);
+    await ui.handleEvent(ui.session, {type:'response.text.done', item_id:'answer', text:'Full'});
+    await ui.handleEvent(ui.session, {type:'conversation.item.truncated', item_id:'answer', content_index:0, audio_end_ms:0});
+    assert.equal(ui.sent[0].type, 'conversation.item.retrieve');
+    assert.equal(ui.sent[0].item_id, 'answer');
+    assert.equal(ui.element('transcript').children[0].children[1].textContent, '');
+    await ui.handleEvent(ui.session, {type:'conversation.item.retrieved',
+      item:{id:'answer', type:'message', role:'assistant', content:[]}});
+    assert.match(ui.element('transcript').children[0].children[0].textContent, /no text retained/);
+    ui.stop();
+  });
+}

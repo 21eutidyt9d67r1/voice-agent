@@ -1,4 +1,5 @@
 import { PcmAudio, validateAudioSession } from './pcm-audio.mjs';
+import { RetainedHistory } from './retained-history.mjs';
 
 const $ = (id) => document.getElementById(id);
 let config, call = null;
@@ -29,7 +30,7 @@ function sendText(event) {
     return;
   }
   session.responding = true;
-  transcript(id, 'user', text);
+  session.history.user(id, text);
   $('text-input').value = '';
   updateTextInput();
 }
@@ -37,23 +38,42 @@ function showError(message) { $('error').textContent = message; $('error').hidde
 function state(title, hint, badge) {
   $('status').textContent = title; $('hint').textContent = hint; $('connection').textContent = badge;
 }
-function transcript(id, role, text, append = false) {
-  if (!id || !text) return;
+function transcript(record) {
+  const {role, text, status} = record;
+  if (!text && ['live', 'complete'].includes(status) && !messages.has(record)) return;
   $('empty')?.remove();
-  let entry = messages.get(id);
+  let entry = messages.get(record);
   if (!entry) {
     const box = document.createElement('div'); box.className = `message ${role}`;
-    const label = document.createElement('label'); label.textContent = role === 'user' ? 'You' : 'Agent';
-    entry = document.createElement('p'); box.append(label, entry); $('transcript').append(box);
-    messages.set(id, entry);
+    const label = document.createElement('label');
+    const body = document.createElement('p'); box.append(label, body); $('transcript').append(box);
+    entry = {box, label, body};
+    messages.set(record, entry);
   }
-  entry.textContent = append ? entry.textContent + text : text;
+  const labels = {
+    live:'Agent - live draft', complete:'Agent', truncated: text ? 'Agent - retained after interruption' : 'Agent - interrupted, no text retained',
+    pending:'Agent - interrupted, retrieving retained text', unavailable:'Agent - retained history unavailable',
+  };
+  entry.label.textContent = role === 'user' ? 'You' : labels[status];
+  entry.body.textContent = text;
   $('transcript').scrollTop = $('transcript').scrollHeight;
+}
+function createHistory(session) {
+  return new RetainedHistory({
+    render:transcript,
+    remove:record => { messages.get(record)?.box.remove(); messages.delete(record); },
+    retrieve:(id, eventId) => {
+      if (call !== session || session.ws?.readyState !== WebSocket.OPEN) throw new Error('The connection is closed.');
+      session.ws.send(JSON.stringify({type:'conversation.item.retrieve', item_id:id, event_id:eventId}));
+    },
+    error:showError,
+  });
 }
 function stop(title = 'Conversation ended', hint = 'Start again whenever you’re ready.') {
   const old = call; call = null;
   if (old) {
     clearTimeout(old.timeout); clearTimeout(old.disconnectTimer); clearInterval(old.clock);
+    old.history?.dispose();
     old.abort.abort(); old.ws?.close(); old.peer?.close(); old.audio?.dispose();
     old.mic?.getTracks().forEach(t => t.stop()); old.remote?.getTracks().forEach(t => t.stop());
   }
@@ -79,8 +99,9 @@ async function playAudio() {
   catch { if (call) $('play').hidden = false; }
 }
 function markReady(session) {
-  if (call !== session) return;
+  if (call !== session || !session.configured || (session.transport === 'webrtc' && session.peer?.connectionState !== 'connected')) return;
   session.ready = true;
+  session.mic?.getAudioTracks().forEach(t => { t.enabled = !session.muted; });
   clearTimeout(session.timeout); clearTimeout(session.disconnectTimer);
   $('mute').disabled = false; $('orb').className = 'orb active';
   updateTextInput();
@@ -135,8 +156,11 @@ async function connectWebRtc(session) {
 async function handleEvent(session, event) {
   if (call !== session) return;
   const type = event.type || '';
+  const historyHandled = session.history.handle(event);
   if (type === 'session.updated' && session.transport === 'websocket') {
     validateAudioSession(event.session);
+  } else if (type === 'bridge.ready') {
+    session.configured = true;
     markReady(session);
   } else if (type === 'response.created') {
     session.responseId = event.response?.id;
@@ -152,6 +176,7 @@ async function handleEvent(session, event) {
     if (!event.sdp_answer) throw new Error('Azure returned no SDP answer.');
     await session.peer.setRemoteDescription({type:'answer', sdp:event.sdp_answer});
   } else if (['bridge.error','rtc.call.error','error'].includes(type)) {
+    if (historyHandled) return;
     throw new Error(event.error?.message || 'Azure could not start this voice session.');
   } else if (type === 'input_audio_buffer.speech_started') {
     session.userSpeaking = true;
@@ -173,16 +198,15 @@ async function handleEvent(session, event) {
   } else if (type === 'output_audio_buffer.stopped' || type === 'output_audio_buffer.cleared') {
     $('orb').className = 'orb active'; $('status').textContent = 'Listening';
   } else if (type === 'conversation.item.input_audio_transcription.completed') {
-    transcript(event.item_id, 'user', event.transcript);
+    session.history.user(event.item_id, event.transcript);
   } else if (type === 'conversation.item.input_audio_transcription.failed') {
     showError('Speech transcription failed for this turn. Check the transcription setting in Foundry.');
-  } else if (/^response\.(output_audio_transcript|audio_transcript|output_text|text)\.(delta|done)$/.test(type)) {
-    transcript(event.item_id || event.response_id, 'assistant', event.delta || event.transcript || event.text, type.endsWith('.delta'));
   }
 }
 async function start() {
   if (call || !config?.configured) return;
   const session = {abort:new AbortController(), muted:false, transport:$('transport').value, ready:false}; call = session;
+  session.history = createHistory(session);
   $('error').hidden = true; $('start').disabled = true; $('stop').disabled = false;
   $('transport').disabled = true; $('elapsed').textContent = '00:00';
   state('Let’s connect', 'Allow microphone access when your browser asks.', 'Connecting');
@@ -202,7 +226,10 @@ async function start() {
     const mic = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true}});
     if (call !== session) { mic.getTracks().forEach(t => t.stop()); return; }
     session.mic = mic;
-    mic.getTracks().forEach(t => { t.onended = () => fail(session, new Error('Microphone disconnected.')); });
+    mic.getTracks().forEach(t => {
+      t.enabled = false;
+      t.onended = () => fail(session, new Error('Microphone disconnected.'));
+    });
     if (session.transport === 'websocket') {
       await session.audio.prepare(mic, audio => {
         if (call !== session || !session.ready || session.ws?.readyState !== WebSocket.OPEN) return;
@@ -228,6 +255,7 @@ async function start() {
       } else if (peer.connectionState === 'failed') fail(session, new Error('WebRTC media failed. Check firewall rules or configure TURN.'));
       else if (peer.connectionState === 'disconnected') {
         session.ready = false;
+        session.mic?.getAudioTracks().forEach(t => { t.enabled = false; });
         updateTextInput();
         state('Reconnecting', 'The media connection was interrupted.', 'Reconnecting');
         clearTimeout(session.disconnectTimer);
@@ -249,13 +277,13 @@ $('stop').onclick = () => stop();
 $('play').onclick = playAudio;
 $('mute').onclick = () => {
   if (!call?.mic) return;
-  call.muted = !call.muted; call.mic.getAudioTracks().forEach(t => { t.enabled = !call.muted; });
+  call.muted = !call.muted; call.mic.getAudioTracks().forEach(t => { t.enabled = call.ready && !call.muted; });
   call.audio?.mute(call.muted);
   $('mute').textContent = call.muted ? 'Unmute mic' : 'Mute mic';
   $('mute').setAttribute('aria-pressed', String(call.muted));
   $('hint').textContent = call.muted ? 'Your microphone is muted. You can still type and hear the agent.' : 'Say hello or send a text message. Your agent will respond.';
 };
-$('clear').onclick = () => { messages.clear(); $('transcript').replaceChildren(); };
+$('clear').onclick = () => { call?.history.clear(); messages.clear(); $('transcript').replaceChildren(); };
 window.addEventListener('pagehide', () => stop());
 $('transport').onchange = () => {
   $('media').textContent = $('transport').value === 'websocket' ? 'WebSocket · PCM16 / 24 kHz' : 'WebRTC · Opus';

@@ -24,6 +24,65 @@ LOGGER = logging.getLogger(__name__)
 MAX_FRAME = 256 * 1024
 MAX_UPSTREAM_FRAME = 4 * 1024 * 1024
 TRANSPORTS = {"websocket", "webrtc"}
+TRUNCATED_ITEM_INCLUDE = "conversation.item.truncated.item"
+
+
+class SessionConfigurationError(Exception):
+    """An actionable, non-sensitive session configuration failure."""
+
+
+def truncation_update(session):
+    """Preserve the advertised VAD configuration and use its wire format."""
+    audio_input = (session.get("audio") or {}).get("input") or {}
+    stable = "turn_detection" in audio_input
+    vad = audio_input.get("turn_detection") if stable else session.get("turn_detection")
+    if not isinstance(vad, dict) or not vad.get("type") or vad.get("create_response") is False:
+        raise SessionConfigurationError(
+            "The saved agent must report server-side turn detection with automatic responses.")
+    include = session.get("include", [])
+    if not isinstance(include, list) or any(not isinstance(value, str) for value in include):
+        raise SessionConfigurationError("Azure returned an invalid session include list.")
+    include = list(dict.fromkeys([*include, TRUNCATED_ITEM_INCLUDE]))
+    vad = {**vad, "auto_truncate": True, "interrupt_response": True}
+    settings = {"include": include}
+    if stable:
+        settings.update({"type": "realtime", "audio": {"input": {"turn_detection": vad}}})
+    else:
+        settings["turn_detection"] = vad
+    return {"type": "session.update", "session": settings}
+
+
+@dataclass
+class SessionConfiguration:
+    update: dict | None = None
+    session_id: str | None = None
+    ready: bool = False
+
+    async def observe(self, frame, upstream):
+        # The first session.updated applies the saved agent, unlike session.created.
+        if frame.get("type") != "session.updated":
+            return False
+        session = frame.get("session") or {}
+        if self.update is None:
+            self.update = truncation_update(session)
+            self.session_id = session.get("id")
+            await upstream.send_json(self.update)
+            return False
+        expected = self.update["session"]
+        stable = "audio" in expected
+        vad = ((session.get("audio") or {}).get("input") or {}).get("turn_detection") if stable else session.get("turn_detection")
+        include = session.get("include", [])
+        if (session.get("id") != self.session_id or not isinstance(vad, dict)
+                or vad.get("auto_truncate") is not True or vad.get("interrupt_response") is not True
+                or not isinstance(include, list)
+                or any(value not in include for value in expected["include"])):
+            self.ready = False
+            raise SessionConfigurationError(
+                "Azure did not acknowledge auto_truncate, interrupt_response and the retained-item include selector. "
+                "Input remains disabled; check support for this agent endpoint/API version.")
+        first_ack = not self.ready
+        self.ready = True
+        return first_ack
 
 
 @dataclass
@@ -146,7 +205,7 @@ async def health(request):
 
 async def asset(request):
     name = request.match_info.get("file", "index.html")
-    if name not in {"index.html", "app.js", "style.css", "pcm-audio.mjs", "pcm-capture.js"}:
+    if name not in {"index.html", "app.js", "style.css", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs"}:
         raise web.HTTPNotFound()
     return web.FileResponse(ROOT / "public" / name)
 
@@ -158,6 +217,13 @@ def validate_client_frame(raw, started, transport="webrtc"):
     kind = frame.get("type")
     if transport not in TRANSPORTS:
         raise ValueError("Unsupported transport.")
+    if kind == "conversation.item.retrieve":
+        item_id = frame.get("item_id")
+        event_id = frame.get("event_id")
+        if (not isinstance(item_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", item_id)
+                or not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", event_id)):
+            raise ValueError("Retrieval requires valid item and event IDs.")
+        return {"type": kind, "item_id": item_id, "event_id": event_id}
     if transport == "webrtc" and not started:
         if kind != "rtc.call.sdp.create" or not isinstance(frame.get("sdp_offer"), str):
             raise ValueError("The first event must contain a WebRTC SDP offer.")
@@ -200,33 +266,45 @@ def validate_client_frame(raw, started, transport="webrtc"):
         if not audio or len(audio) % 2 or len(audio) > 48000:
             raise ValueError("Audio must be PCM16, at most one second per event.")
         return {"type": kind, "audio": frame["audio"]}
-    # Keep all agent configuration in Foundry, not client-controlled session updates.
-    raise ValueError("Only user text and response requests are accepted after the SDP offer.")
+    # Only the bridge can change the active session configuration.
+    raise ValueError("Only user text, response requests and item retrieval are accepted after the SDP offer.")
 
 
-async def forward_browser(browser, upstream, transport):
+async def forward_browser(browser, upstream, transport, configuration):
     started = False
     async for message in browser:
         if message.type == aiohttp.WSMsgType.TEXT:
             frame = validate_client_frame(message.data, started, transport)
+            if not configuration.ready and frame["type"] not in {"rtc.call.sdp.create", "conversation.item.retrieve"}:
+                raise SessionConfigurationError("Wait for the retained-history configuration acknowledgment before sending input.")
             await upstream.send_json(frame)
-            started = True
+            if frame["type"] == "rtc.call.sdp.create":
+                started = True
         elif message.type == aiohttp.WSMsgType.BINARY:
             raise ValueError("Send JSON events; binary frames are not supported.")
 
 
-async def forward_upstream(upstream, browser, transport):
-    async for message in upstream:
-        if message.type == aiohttp.WSMsgType.TEXT:
-            # WebRTC plays RTP; WebSocket mode needs base64 PCM audio deltas.
-            frame = json.loads(message.data)
-            if transport == "websocket" or frame.get("type") not in {"response.audio.delta", "response.output_audio.delta"}:
-                await browser.send_str(message.data)
+async def forward_upstream(upstream, browser, transport, configuration):
+    try:
+        async with asyncio.timeout(30) as deadline:
+            async for message in upstream:
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    frame = json.loads(message.data)
+                    acknowledged = await configuration.observe(frame, upstream)
+                    # WebRTC plays RTP; WebSocket mode needs base64 PCM audio deltas.
+                    if transport == "websocket" or frame.get("type") not in {"response.audio.delta", "response.output_audio.delta"}:
+                        await browser.send_str(message.data)
+                    if acknowledged:
+                        deadline.reschedule(None)
+                        await browser.send_json({"type": "bridge.ready"})
+    except TimeoutError:
+        raise SessionConfigurationError("Timed out waiting for Azure to acknowledge retained-history session configuration.") from None
 
 
 async def relay(browser, upstream, transport):
-    tasks = [asyncio.create_task(forward_browser(browser, upstream, transport)),
-             asyncio.create_task(forward_upstream(upstream, browser, transport))]
+    configuration = SessionConfiguration()
+    tasks = [asyncio.create_task(forward_browser(browser, upstream, transport, configuration)),
+             asyncio.create_task(forward_upstream(upstream, browser, transport, configuration))]
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -311,7 +389,7 @@ async def connect_voice(client, cfg, headers, transport):
 
 def describe_connection_error(error):
     """Return actionable diagnostics without exposing URLs, keys or raw exceptions."""
-    if isinstance(error, (AuthenticationError, VoiceEndpointError)):
+    if isinstance(error, (AuthenticationError, VoiceEndpointError, SessionConfigurationError)):
         return str(error)
     if isinstance(error, aiohttp.WSServerHandshakeError):
         if error.status == 401:

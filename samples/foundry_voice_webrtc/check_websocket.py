@@ -6,7 +6,7 @@ import json
 import aiohttp
 
 from auth import AzureCliTokenProvider
-from server import connect_voice, describe_connection_error, load_settings
+from server import SessionConfiguration, connect_voice, describe_connection_error, load_settings
 
 
 async def check():
@@ -27,14 +27,15 @@ async def check():
                         "Foundry-Features": cfg.features}, "websocket") as ws:
                     print(json.dumps({"stage": "websocket_upgrade", "ok": True}), flush=True)
                     stage = "session_startup"
+                    configuration = SessionConfiguration()
                     async for message in ws:
                         if message.type != aiohttp.WSMsgType.TEXT:
                             continue
                         event = json.loads(message.data)
                         events.append(event.get("type"))
-                        if event.get("type") == "session.updated":
+                        if await configuration.observe(event, ws):
                             print(json.dumps({"ok": True, "stage": "session_ready", "events": events,
-                                              "note": "No microphone audio or user turn was sent."}))
+                                              "note": "Retained-history settings acknowledged; no microphone audio or user turn was sent."}))
                             return 0
                         if event.get("type") == "error":
                             print(json.dumps({"ok": False, "stage": "service_error", "events": events}))
