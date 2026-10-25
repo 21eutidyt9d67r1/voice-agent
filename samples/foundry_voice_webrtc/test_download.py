@@ -11,8 +11,9 @@ import aiohttp
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from server import (DOWNLOAD_SECRET, ConversationDownloadError, Settings, conversation_download_token,
-                    create_app, forward_upstream, verify_download_token, write_conversation_archive)
+from server import (DOWNLOAD_SECRET, ConversationDownloadError, SessionConfiguration, Settings,
+                    conversation_download_token, create_app, forward_upstream, truncation_update,
+                    verify_download_token, write_conversation_archive)
 
 
 def recording():
@@ -97,14 +98,25 @@ class DownloadTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await response.json(), {"error": "Not ready"})
 
     async def test_upstream_announces_the_conversation_once_for_both_transports(self):
-        class Upstream:
-            def __aiter__(self):
-                async def events():
-                    for kind in ("session.created", "session.updated"):
-                        yield SimpleNamespace(type=aiohttp.WSMsgType.TEXT,
-                                              data=json.dumps({"type": kind, "conversation_id": "conv_test"}))
-                return events()
         for transport in ("websocket", "webrtc"):
+            session = {"id": "session_test", "model": "gpt-realtime-2.1",
+                       "turn_detection": {"type": "azure_semantic_vad", "create_response": True}}
+            if transport == "websocket":
+                session["audio"] = {"input": {"turn_detection": session.pop("turn_detection")}}
+            acknowledged = {**session, **truncation_update(session)["session"]}
+            events = [
+                {"type": "session.created", "conversation_id": "conv_test", "session": session},
+                {"type": "session.updated", "conversation_id": "conv_test", "session": session},
+                {"type": "session.updated", "conversation_id": "conv_test", "session": acknowledged},
+            ]
+            upstream = AsyncMock()
+            upstream.__aiter__.return_value = [
+                SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=json.dumps(event)) for event in events]
+            configuration = SessionConfiguration()
             callback, browser = AsyncMock(), AsyncMock()
-            await forward_upstream(Upstream(), browser, transport, callback)
+            await forward_upstream(upstream, browser, transport, configuration, on_conversation=callback)
             callback.assert_awaited_once_with("conv_test")
+            self.assertTrue(configuration.ready)
+            upstream.send_json.assert_awaited_once_with(truncation_update(session))
+            browser.send_json.assert_awaited_once_with({"type": "bridge.ready"})
+            self.assertEqual([json.loads(call.args[0]) for call in browser.send_str.call_args_list], events)
