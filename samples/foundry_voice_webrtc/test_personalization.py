@@ -79,6 +79,18 @@ class PersonalizationTests(unittest.TestCase):
         self.assertEqual(next_values["user_context"], "")
         self.assertEqual(next_values["language_policy"], values["language_policy"])
 
+    def test_multilingual_policy_follows_caller_language_and_ui_defaults_to_unrestricted(self):
+        import re
+        for language in ("en-US", "es-ES"):
+            values = json.loads(personalization_header(frame(client_language=language, english_only=False)))
+            self.assertIn("respond in the language the caller speaks or explicitly requests", values["language_policy"])
+            self.assertIn("including languages other than English or Spanish", values["language_policy"])
+            self.assertIn("Switch languages when requested", values["language_policy"])
+            self.assertNotIn("Please continue in English", values["language_policy"])
+        page = Path(__file__).with_name("public").joinpath("index.html").read_text(encoding="utf-8")
+        checkbox = re.search(r'<input id="english-only"[^>]*>', page).group()
+        self.assertNotIn("checked", checkbox)
+
     def test_definition_declares_inputs_and_generates_personalized_greeting(self):
         definition = json.loads(Path(__file__).with_name("personalized-agent.json").read_text())
         values = json.loads(personalization_header(frame()))

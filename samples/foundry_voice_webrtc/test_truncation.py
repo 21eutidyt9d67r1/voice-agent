@@ -87,6 +87,24 @@ class ConfigurationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SessionConfigurationError):
                 truncation_update(session)
 
+    async def test_unset_initial_include_accepts_null_but_ack_still_requires_selector(self):
+        for stable in (True, False):
+            for initial in (None, []):
+                original = saved_session(stable)
+                original["include"] = initial
+                config, upstream = SessionConfiguration(), AsyncMock()
+                await config.observe({"type": "session.updated", "session": original}, upstream)
+                self.assertEqual(config.update["session"]["include"], [TRUNCATED_ITEM_INCLUDE])
+                self.assertEqual(original["include"], initial)
+                ack = {"id": original["id"], **copy.deepcopy(config.update["session"])}
+                for invalid in (None, [], "not a list"):
+                    with self.subTest(stable=stable, initial=initial, ack=invalid):
+                        with self.assertRaises(SessionConfigurationError):
+                            await config.observe({"type": "session.updated", "session": {**ack, "include": invalid}}, upstream)
+                        self.assertFalse(config.ready)
+                self.assertTrue(await config.observe({"type": "session.updated", "session": ack}, upstream))
+                self.assertTrue(config.ready)
+
     async def test_bridge_ready_only_after_ack_and_preserves_transport_audio_filtering(self):
         for transport in ("websocket", "webrtc"):
             original = saved_session(transport == "websocket")

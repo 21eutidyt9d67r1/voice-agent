@@ -55,8 +55,6 @@ export class PcmAudio {
     if (this.disposed) return;
     const samples = decodePcm(base64);
     if (!samples.length) return;
-    if (this.nextTime - this.context.currentTime > 30)
-      throw new Error('Speaker playback fell too far behind. Restart the conversation.');
     const buffer = this.context.createBuffer(1, samples.length, 24000);
     buffer.copyToChannel(samples, 0);
     const node = this.context.createBufferSource(); node.buffer = buffer;

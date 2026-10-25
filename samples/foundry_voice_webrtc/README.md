@@ -311,13 +311,18 @@ and enter synthetic data such as display name `Alex` and context
 `Interested in beginner hiking routes`. The browser suggests English or Spanish
 from its language setting; you can override it before connecting.
 
-**English-only instructions** are enabled by default. Even with Spanish selected,
-the AI-generated greeting and spoken/written replies are instructed to use English.
+**Multilingual replies are enabled by default.** Client language selects the
+initial greeting preference, not a restriction on conversation languages.
+The Agent is instructed to follow the language the caller speaks or requests,
+including languages other than English and Spanish, and switch when requested.
 The greeting uses the supplied display name when present, or no name when absent;
-its wording can vary. For non-English requests, the Agent is instructed to ask
-in English to continue in English, without fulfilling or translating the request.
-Unclear audio should prompt repetition rather than an assumed language.
-Uncheck English-only to demonstrate a Spanish greeting and default replies.
+its wording can vary. Unclear audio should prompt clarification rather than an
+assumed language.
+
+**English-only instructions** remain an optional, unchecked setting. Enable it
+only to demonstrate an English-restricted session: it overrides client language
+and asks callers using other languages to continue in English. These settings
+are supplied anew at session start, not saved as an Agent version.
 
 The example declares string `structured_inputs`: `display_name`, `user_context`,
 `client_language`, `language_policy`, and `greeting_text`. The backend constructs

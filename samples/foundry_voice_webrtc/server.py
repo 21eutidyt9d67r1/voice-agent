@@ -47,6 +47,8 @@ def truncation_update(session):
         raise SessionConfigurationError(
             "The saved agent must report server-side turn detection with automatic responses.")
     include = session.get("include", [])
+    if include is None:
+        include = []
     if not isinstance(include, list) or any(not isinstance(value, str) for value in include):
         raise SessionConfigurationError("Azure returned an invalid session include list.")
     include = list(dict.fromkeys([*include, TRUNCATED_ITEM_INCLUDE]))
@@ -298,7 +300,13 @@ def personalization_header(frame):
             "the non-English request. Do not switch languages even when requested. Proper names and "
             "identifiers may retain their original form. For unclear input, ask in English for repetition "
             "rather than assuming another language. This policy overrides the client language preference."
-            if english else f"Greet and respond in {LANGUAGES[language]} by default; follow the caller's language preference."
+            if english else (
+                f"Use {LANGUAGES[language]} for the initial greeting. After that, respond in the language "
+                "the caller speaks or explicitly requests, including languages other than English or Spanish. "
+                "Switch languages when requested. Do not ask the caller to use English or refuse a request "
+                "just because it is not in English. For unclear audio, ask for clarification rather than "
+                "guessing the language."
+            )
         ),
         "greeting_text": greeting,
     }

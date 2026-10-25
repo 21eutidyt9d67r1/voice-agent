@@ -73,9 +73,9 @@
             <label for="display-name">Demo display name</label><input id="display-name" maxlength="80" autocomplete="off">
             <label for="user-context">User context (demo data only)</label><textarea id="user-context" maxlength="2000" rows="3" placeholder="For example: interested in beginner hiking routes."></textarea>
             <label for="client-language">Client language</label><select id="client-language"><option value="en-US">English</option><option value="es-ES">Spanish</option></select>
-            <label><input id="english-only" type="checkbox" checked> English-only instructions (override client language)</label>
+            <label><input id="english-only" type="checkbox"> English-only instructions (optional; override client language)</label>
           </fieldset>
-          <p>Context is unverified personalization, not identity. It is sent to Azure and may be persisted. English-only instructions do not block non-English audio or configure speech recognition.</p>
+          <p>Multilingual replies are enabled by default: the Agent follows the language you speak or request. Client language sets the initial greeting preference, not a language restriction. Context is unverified personalization, not identity. It is sent to Azure and may be persisted. Language instructions do not configure speech recognition.</p>
         </details>
         <div id="orb" class="orb" aria-hidden="true"><span>◉</span></div>
         <h3 id="status" role="status">Ready when you are</h3><p id="hint">Start a session to enable your microphone.</p>
