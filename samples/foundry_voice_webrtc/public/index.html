@@ -11,12 +11,22 @@
   <canvas id="weather-scene" aria-hidden="true"></canvas>
   <header><a class="brand" href="/">◉ <span>Voice Agent In Foundry Agent Service</span></a><span class="tag">AZURE FOUNDRY <span> / </span> LIVE VOICE</span><a class="repository-link" href="https://github.com/microsoft/voice-agent" target="_blank" rel="noopener noreferrer">microsoft/voice-agent on GitHub</a></header>
   <main>
-    <section class="intro"><p class="eyebrow">YOUR FIRST VOICE AGENT</p><h1>A conversation.<br>Just a little more human.</h1><p>Speak naturally or type a message. Pause to hear a reply. Interrupt when you need to.</p><div class="weather-controls"><span id="weather-status" role="status">Loading Seattle weather...</span><button id="weather-motion" type="button" aria-pressed="false">Pause scenery</button><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather: Open-Meteo</a></div></section>
+    <section class="intro"><p class="eyebrow">YOUR FIRST VOICE AGENT</p><h1>A little more human.</h1><p>Speak or type. Hear a reply. Interrupt naturally.</p><div class="weather-controls"><span id="weather-status" role="status">Loading Seattle weather...</span><button id="weather-motion" type="button" aria-pressed="false">Pause scenery</button><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather: Open-Meteo</a></div></section>
     <div class="workspace">
       <section class="call-panel" aria-labelledby="call-title">
         <div class="panel-top"><h2 id="call-title">Voice session</h2><span id="connection" class="badge">Offline</span></div>
-        <div class="transport-control"><h2>Your Agent</h2><p id="agent-preparation" role="status">Checking for your saved Agent...</p><p>Model: <strong id="agent-model">Unavailable</strong> · Version: <strong id="agent-version">Not created</strong></p><p id="weather-tool-hint" hidden>Weather lookup is included through Foundry Toolbox.</p>
+        <div class="agent-summary"><p id="agent-preparation" role="status">Checking for your saved Agent...</p><p>Model: <strong id="agent-model">Unavailable</strong> · Version: <strong id="agent-version">Not created</strong></p>
           <p>Transcription: <strong id="agent-transcription">Unavailable</strong></p>
+        </div>
+        <div id="orb" class="orb" aria-hidden="true"><span>◉</span></div>
+        <h3 id="status" role="status">Ready when you are</h3><p id="hint">Start a session to enable your microphone.</p>
+        <p id="recording-notice" class="recording-notice"><strong>Audio is saved by default.</strong> Your microphone audio and messages are sent to Azure and stored there. After the call, download the log and audio. Clearing this page does not delete Azure recordings.</p>
+        <div class="controls"><button id="start" class="primary" disabled>Start conversation <span>↗</span></button><button id="mute" disabled aria-pressed="false">Mute mic</button><button id="stop" class="end" disabled>End</button></div>
+        <button id="play" class="play" hidden>Enable speaker audio</button>
+        <p id="error" class="error" role="alert" hidden></p>
+        <details id="agent-audio-settings" class="settings-panel">
+          <summary>Agent &amp; audio settings</summary>
+        <div class="transport-control"><h2>Saved Agent</h2><p id="weather-tool-hint" hidden>Weather lookup is included through Foundry Toolbox.</p>
           <label for="agent-model-choice">Change model</label><select id="agent-model-choice" disabled><option value="gpt-realtime-2.1">gpt-realtime-2.1</option><option value="azure-realtime">azure-realtime</option><option value="gpt-5.4">gpt-5.4</option></select>
           <label for="agent-transcription-choice">Transcription model</label>
           <select id="agent-transcription-choice" disabled>
@@ -68,6 +78,7 @@
           </select>
           <p>Availability depends on the project and voice catalog. Unsupported selections fail without substituting a voice. A voice preview for a different model applies after you save that model.</p>
         </div>
+        <div class="transport-control audio-processing"><h2>Audio processing</h2><p>The browser requests microphone noise suppression and echo cancellation with mono input. Support depends on your browser and device.</p><p>Azure denoising is configured separately in the saved Agent. Use <strong>Show Agent settings</strong> above to inspect <code>audio.input.noise_reduction</code>. The bundled example uses headset noise suppression; an existing Agent may differ.</p></div>
         <details class="transport-control">
           <summary>Session personalization</summary>
           <fieldset id="personalization">
@@ -79,18 +90,13 @@
           </fieldset>
           <p>Multilingual replies are enabled by default: the Agent follows the language you speak or request. Client language sets the initial greeting preference, not a language restriction. Context is unverified personalization, not identity. It is sent to Azure and may be persisted. Language instructions do not configure speech recognition.</p>
         </details>
-        <div id="orb" class="orb" aria-hidden="true"><span>◉</span></div>
-        <h3 id="status" role="status">Ready when you are</h3><p id="hint">Start a session to enable your microphone.</p>
-        <p id="recording-notice" class="recording-notice"><strong>Audio is saved by default.</strong> Starting a conversation sends microphone audio and messages to Azure, where the conversation and audio are stored. After ending the call, download the log and audio below. Clearing this page does not delete Azure recordings.</p>
-        <div class="controls"><button id="start" class="primary" disabled>Start conversation <span>↗</span></button><button id="mute" disabled aria-pressed="false">Mute mic</button><button id="stop" class="end" disabled>End</button></div>
-        <button id="play" class="play" hidden>Enable speaker audio</button>
-        <p id="error" class="error" role="alert" hidden></p>
         <div class="session-details"><div><span>AGENT</span><strong id="agent">Not configured</strong></div><div><span>MEDIA</span><strong id="media">WebSocket · PCM16 / 24 kHz</strong></div></div>
         <p class="privacy">Microphone audio and submitted text are sent to Azure during a call. Azure conversation/audio storage is enabled. Clearing this page does not delete Azure-stored data. This app does not save transcripts locally.</p>
         <details id="advanced-agent" class="transport-control" hidden>
           <summary>Advanced</summary>
           <p>Reset permanently deletes this demo Agent and its saved versions, then saves a fresh Agent under the same name. Other clients using it may be affected. You must confirm the Agent name.</p>
           <button id="recreate-agent" class="end" disabled>Reset Agent</button>
+        </details>
         </details>
       </section>
       <section class="transcript-panel" aria-labelledby="transcript-title">

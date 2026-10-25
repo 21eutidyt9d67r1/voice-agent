@@ -23,6 +23,13 @@ interruption with authoritative retained history, model/version controls, read-o
 logs with audio, and end-call cleanup. The frontend uses plain HTML/CSS/JavaScript
 and needs no build step. A Python backend keeps Azure credentials out of the browser.
 
+The session controls and saved model/version summary appear first, alongside the
+conversation on desktop and above it on mobile. Expand **Agent & audio settings**
+for model/transcription changes, connection and voice selection, audio-processing
+notes, personalization, and advanced reset controls. The audio-processing notes
+distinguish requested browser processing from the saved Agent's Azure denoising;
+use **Show Agent settings** to inspect the actual saved definition.
+
 The browser also displays an animated Seattle landscape using Open-Meteo current
 weather, refreshed every 15 minutes. Cloud cover, day/night, precipitation, and
 wind drive the sky, rain/snow, and drifting leaves; no location permission or

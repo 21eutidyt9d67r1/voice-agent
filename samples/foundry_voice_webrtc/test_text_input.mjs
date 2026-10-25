@@ -239,6 +239,22 @@ test('Conversation download waits for End and posts only its session capability'
   assert.match(ui.element('download-status').textContent, /conversation.json and audio.wav/);
 });
 
+test('Session controls and saved summary precede collapsed Agent and audio settings', async () => {
+  const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
+  const settings = html.indexOf('<details id="agent-audio-settings"');
+  assert.ok(settings > 0);
+  assert.match(html, /<details id="agent-audio-settings" class="settings-panel">/);
+  for (const id of ['agent-preparation', 'agent-model', 'agent-version', 'agent-transcription', 'start', 'mute', 'stop', 'error']) {
+    assert.ok(html.indexOf(`id="${id}"`) < settings, `${id} stays visible outside settings`);
+    assert.equal(html.split(`id="${id}"`).length, 2, `${id} is unique`);
+  }
+  for (const id of ['agent-model-choice', 'agent-transcription-choice', 'transport', 'voice', 'personalization', 'advanced-agent']) {
+    assert.ok(html.indexOf(`id="${id}"`) > settings, `${id} is below the primary controls`);
+  }
+  assert.match(html, /<h2>Audio processing<\/h2>/);
+  assert.match(html, /existing Agent may differ/);
+});
+
 test('Recording notice is visible before the conversation controls', async () => {
   const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
   assert.match(html, /Audio is saved by default/);
