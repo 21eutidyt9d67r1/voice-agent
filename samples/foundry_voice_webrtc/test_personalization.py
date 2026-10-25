@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from server import HD_VOICES, NATIVE_VOICES, Settings, create_app, personalization_header, validate_client_frame
+from server import HD_VOICES, MAI_FLASH_VOICES, NATIVE_VOICES, Settings, create_app, personalization_header, validate_client_frame
 
 
 def frame(**changes):
@@ -25,11 +25,13 @@ class PersonalizationTests(unittest.TestCase):
         expected = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler", "Paige", "Colin", "Brian", "Emma")} | {
             "en-IN-Diya:DragonHDLatestNeural", "zh-CN-Xiaoqi:DragonHDFlashLatestNeural", "zh-CN-Xiaoke:DragonHDFlashLatestNeural"}
         self.assertEqual(HD_VOICES, expected)
+        self.assertEqual(MAI_FLASH_VOICES, {"en-US-Harper:MAI-Voice-2.1-Flash", "en-GB-Harry:MAI-Voice-2.1-Flash"})
         page = Path(__file__).with_name("public").joinpath("index.html").read_text(encoding="utf-8")
         import re
         self.assertEqual(set(re.findall(r'<option value="([^"]+:DragonHD(?:Flash)?LatestNeural)"', page)), expected)
+        self.assertEqual(set(re.findall(r'<option value="([^"]+:MAI-Voice-2\.1-Flash)"', page)), MAI_FLASH_VOICES)
         for value, label in re.findall(r'<option value="([^"]+)"[^>]*>([^<]+)</option>', page):
-            if value in HD_VOICES | NATIVE_VOICES:
+            if value in HD_VOICES | MAI_FLASH_VOICES | NATIVE_VOICES:
                 self.assertEqual(label, value)
         native = re.search(r'<select id="native-voice".*?</select>', page, re.S).group()
         self.assertEqual(set(re.findall(r'<option value="([a-z]+)"', native)), NATIVE_VOICES)
@@ -124,7 +126,7 @@ class PersonalizationTests(unittest.TestCase):
 
 class BridgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_initialization_precedes_azure_connect_for_both_transports(self):
-        for transport, voice in product(("websocket", "webrtc"), sorted(HD_VOICES | NATIVE_VOICES)):
+        for transport, voice in product(("websocket", "webrtc"), sorted(HD_VOICES | MAI_FLASH_VOICES | NATIVE_VOICES)):
             observed = []
 
             @asynccontextmanager

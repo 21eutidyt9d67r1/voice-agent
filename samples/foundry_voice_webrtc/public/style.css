@@ -71,6 +71,8 @@ header,footer,#setup{background:rgba(247,248,244,.5);backdrop-filter:blur(3px);-
 .call-panel p,.intro>p,.history-help,.text-composer p{color:#405448}
 .recording-notice{background:rgba(238,241,223,.85)}
 .eyebrow,#empty h3,#empty p,.text-button,.transport-control label,.transcript-footer{color:#2c4436}
+#setup,#setup p,main>.privacy,footer{color:#405448}
+#setup summary{color:#334e3a}
 .scenery-toolbar{position:fixed;right:16px;bottom:16px;z-index:10;max-width:calc(100vw - 32px);padding:4px;border:1px solid #ffffff99;border-radius:8px;background:rgba(247,248,244,.86);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);box-shadow:0 4px 20px #203a3226}
 .scenery-toolbar>div{display:flex;gap:4px}
 .scenery-toolbar button{font-size:0;padding:0;border-radius:5px;width:26px;height:26px;min-height:26px}

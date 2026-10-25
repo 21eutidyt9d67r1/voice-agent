@@ -99,6 +99,7 @@ WEATHER_TOOLBOX_NAME = "weather"
 LANGUAGES = {"en-US": "English", "es-ES": "Spanish"}
 HD_VOICES = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler", "Paige", "Colin", "Brian", "Emma")} | {
     "en-IN-Diya:DragonHDLatestNeural", "zh-CN-Xiaoqi:DragonHDFlashLatestNeural", "zh-CN-Xiaoke:DragonHDFlashLatestNeural"}
+MAI_FLASH_VOICES = {"en-US-Harper:MAI-Voice-2.1-Flash", "en-GB-Harry:MAI-Voice-2.1-Flash"}
 NATIVE_VOICES = {"ava", "andrew", "emma", "clara", "liam", "natasha", "rayn", "alvaro", "dalia", "jorge"}
 MODELS = {"gpt-realtime-2.1", "azure-realtime", "gpt-5.4"}
 TRANSCRIPTION_MODELS = {
@@ -1019,8 +1020,8 @@ async def bridge(request):
         await browser.prepare(request)
         structured = None
         voice = request.query.get("voice", "")
-        if voice and voice not in HD_VOICES | NATIVE_VOICES:
-            raise ValueError("Choose a supported demo HD voice.")
+        if voice and voice not in HD_VOICES | MAI_FLASH_VOICES | NATIVE_VOICES:
+            raise ValueError("Choose a supported demo output voice.")
         if cfg.personalization_required and request.query.get("personalize") != "true":
             raise ValueError("This Agent requires session personalization.")
         if request.query.get("personalize") == "true":

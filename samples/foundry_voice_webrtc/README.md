@@ -384,7 +384,7 @@ there is no silent fallback to a greeting without context.
 
 The voice list displays full service IDs, with
 `en-US-Tyler:DragonHDLatestNeural` selected by default. For GPT models, choose
-an HD voice before connecting, or choose **Saved Agent voice** to preserve the stored setting. The backend
+an HD or MAI Flash voice before connecting, or choose **Saved Agent voice** to preserve the stored setting. The backend
 allowlists these choices and sends an `x-ms-voice-session-override` containing
 `audio.output.voice` and `voice_type: "azure-standard"` at connection time
 (the HD model is selected by the voice name, not a separate `azure-hd` type).
@@ -402,15 +402,23 @@ The configured HD voices are:
 - `zh-CN-Xiaoqi:DragonHDFlashLatestNeural`
 - `zh-CN-Xiaoke:DragonHDFlashLatestNeural`
 
+The selector also includes these MAI Flash voices:
+
+- `en-US-Harper:MAI-Voice-2.1-Flash`
+- `en-GB-Harry:MAI-Voice-2.1-Flash`
+
+They use the same `azure-standard` session override and do not change the saved
+Agent or the default Tyler HD selection.
+
 Voice availability must be checked for your project.
 The example Agent defaults to Tyler HD. Unsupported selections fail visibly;
 the sample does not substitute another voice. An English voice identifier alone
 does not enforce English-only conversation.
 
-HD voice overrides require an Agent/model that accepts Azure Speech output, such
+HD and MAI Flash voice overrides require an Agent/model that accepts Azure Speech output, such
 as the example managed `gpt-realtime-2.1` pipeline. An `azure-realtime` Agent accepts
 only `azure-realtime-native` voices; changing the override type cannot make an
-HD Speech voice compatible. Its separate native list offers `ava`, `andrew`,
+Speech voice compatible. Its separate native list offers `ava`, `andrew`,
 `emma`, `clara`, `liam`, `natasha`, `rayn`, `alvaro`, `dalia`, and `jorge`.
 The backend sends `voice_type: "azure-realtime-native"` for those selections.
 Session voice selection never publishes an Agent version. Chinese HD voice
