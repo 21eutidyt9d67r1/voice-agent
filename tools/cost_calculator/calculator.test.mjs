@@ -55,7 +55,7 @@ test("South India GPT-4.1 and realtime prices do not reuse managed tier rates", 
 });
 
 test("unverified managed tiers use explicit Global model references, not invented tier rates", () => {
-  for (const id of ["gpt-5.4-mini", "gpt-5.4-nano", "gpt-oss-120b", "gpt-6-sol"]) {
+  for (const id of ["gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-oss-120b", "gpt-6-sol"]) {
     const reference = getRates(snapshot, model(id), "managed");
     assert.equal(reference.usesGlobalReference, true);
     assert.deepEqual(reference.rates, book(id, "byom"));
@@ -66,6 +66,27 @@ test("unverified managed tiers use explicit Global model references, not invente
   const tier = getRates(snapshot, model("gpt-4.1"), "managed");
   assert.equal(tier.usesGlobalReference, false);
   close(tier.rates.textInput, 4);
+});
+
+test("GPT-5.6 Luna BYOM uses exact Standard Global inference meters and BYO speech", () => {
+  const { rates, sources } = getRates(snapshot, model("gpt-5.6-luna"), "byom");
+  close(rates.textInput, 0.2);
+  close(rates.textCached, 0.02);
+  close(rates.textOutput, 1.2);
+  close(rates.speechInput, 12.5);
+  close(rates.speechOutput, 23);
+  for (const key of ["textInput", "textCached", "textOutput"]) {
+    assert.match(sources[key].meterName, /^5\.6 luna ShortCo .* Std Gl 1M Tokens$/);
+    assert.equal(sources[key].retrievedAt, "2026-10-26");
+    assert.equal(sources[key].armRegionName, "southindia");
+    assert.equal(sources[key].processingScope, "Global");
+  }
+  const textCost = (5000 * 0.2 + 15000 * 0.02 + 150 * 0.2 + 450 * 0.02 + 150 * 1.2) / 1e6;
+  const cascade = calculate(DEFAULTS, "cascade", rates);
+  close(cascade.list, textCost + (360 * 12.5 + 720 * 23) / 1e6);
+  close(cascade.listPerMinute, cascade.list / 1.5);
+  const live = calculate(DEFAULTS, "live", book("gpt-5.6-luna", "byom", "live"));
+  close(live.list, textCost + 1.5 * 0.05);
 });
 
 test("all selectable models have priced scenarios across both hosting modes", () => {

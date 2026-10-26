@@ -10,6 +10,42 @@
   ],
   "meters": [
     {
+      "productName": "Azure OpenAI GPT5",
+      "skuName": "5.6 luna ShortCo Inp Std Gl",
+      "meterName": "5.6 luna ShortCo Inp Std Gl 1M Tokens",
+      "armRegionName": "southindia",
+      "processingScope": "Global",
+      "retailPrice": 0.2,
+      "unitOfMeasure": "1M",
+      "meterId": "a05ffb45-17d1-5a56-a43e-f8af27b7e7e5",
+      "effectiveStartDate": "2026-08-01T00:00:00Z",
+      "retrievedAt": "2026-10-26"
+    },
+    {
+      "productName": "Azure OpenAI GPT5",
+      "skuName": "5.6 luna ShortCo Cd Inp Std Gl",
+      "meterName": "5.6 luna ShortCo Cd Inp Std Gl 1M Tokens",
+      "armRegionName": "southindia",
+      "processingScope": "Global",
+      "retailPrice": 0.02,
+      "unitOfMeasure": "1M",
+      "meterId": "5489ae4f-17c9-5271-931c-da4e2289dffc",
+      "effectiveStartDate": "2026-08-01T00:00:00Z",
+      "retrievedAt": "2026-10-26"
+    },
+    {
+      "productName": "Azure OpenAI GPT5",
+      "skuName": "5.6 luna ShortCo Opt Std Gl",
+      "meterName": "5.6 luna ShortCo Opt Std Gl 1M Tokens",
+      "armRegionName": "southindia",
+      "processingScope": "Global",
+      "retailPrice": 1.2,
+      "unitOfMeasure": "1M",
+      "meterId": "d01c83fd-4a6c-5c28-b962-9e3de99eb4cd",
+      "effectiveStartDate": "2026-08-01T00:00:00Z",
+      "retrievedAt": "2026-10-26"
+    },
+    {
       "productName": "Azure Speech",
       "skuName": null,
       "meterName": "Voice Live API Lite - Custom Speech Audio Cached Tokens",
