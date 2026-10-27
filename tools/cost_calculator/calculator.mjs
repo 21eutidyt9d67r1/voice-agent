@@ -14,6 +14,9 @@ export const MODELS = [
   { id: "gpt-realtime-2.1-mini", name: "GPT Realtime 2.1 mini", tier: "Std", realtime: true },
   { id: "gpt-realtime", name: "GPT Realtime 1.0 (gpt-realtime)", tier: "Pro", realtime: true },
   { id: "gpt-realtime-1.5", name: "GPT Realtime 1.5", tier: "Pro", realtime: true },
+  { id: "azure-realtime", name: "Azure Realtime", tier: "Pro", realtime: true, managedNativeOnly: true },
+  { id: "azure-realtime-fast", name: "Azure Realtime Fast", tier: "Lite", realtime: true,
+    managedNativeOnly: true, tierAssumption: true },
   { id: "gpt-4.1", name: "GPT-4.1", tier: "Pro" },
   { id: "gpt-4.1-mini", name: "GPT-4.1 mini", tier: "Std" },
   { id: "gpt-4.1-nano", name: "GPT-4.1 nano", tier: "Lite" },
@@ -26,6 +29,11 @@ export const MODELS = [
   { id: "gpt-oss-120b", name: "GPT OSS 120B", oss: true },
   { id: "gpt-6-sol", name: "GPT-6 Sol" },
 ];
+
+export function supportsScenario(model, hosting, pipeline) {
+  if (model.managedNativeOnly) return hosting === "managed" && pipeline === "native";
+  return ["native", "hybrid"].includes(pipeline) ? Boolean(model.realtime) : !model.realtime;
+}
 
 export function validateAssumptions(a) {
   for (const key of Object.keys(DEFAULTS)) {
@@ -56,6 +64,9 @@ export function meterRate(snapshot, name, unit = "tokens") {
 }
 
 export function getRates(snapshot, model, hosting, pipeline = "cascade") {
+  if (model.managedNativeOnly && !supportsScenario(model, hosting, pipeline)) {
+    throw new Error(`${model.name} uses a managed native-audio tier reference; no BYOM or alternative-pipeline rates are verified.`);
+  }
   const rates = { textInput: null, textCached: null, textOutput: null,
     audioInput: null, audioCached: null, audioOutput: null, speechInput: null, speechOutput: null,
     liveMinute: null };
