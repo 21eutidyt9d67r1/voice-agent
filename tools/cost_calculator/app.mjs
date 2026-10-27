@@ -1,4 +1,4 @@
-import { DEFAULTS, PROMPTS, MODELS, GPT_LIVE_METER, getRates, calculate } from "./calculator.mjs";
+import { DEFAULTS, PROMPTS, MODELS, GPT_LIVE_METER, supportsScenario, getRates, calculate } from "./calculator.mjs";
 
 const $ = id => document.getElementById(id);
 const form = $("assumptions");
@@ -51,7 +51,7 @@ function modelRates(model, pipeline) {
 
 function populateModels(preferred) {
   const pipeline = $("pipeline").value;
-  const available = MODELS.filter(m => ["native", "hybrid"].includes(pipeline) ? m.realtime : !m.realtime);
+  const available = MODELS.filter(m => supportsScenario(m, effectiveHosting(pipeline), pipeline));
   $("model").replaceChildren(...available.map(m => {
     const option = element("option", m.name);
     option.value = m.id;
@@ -111,6 +111,8 @@ function rateEditor(model, pipeline, book) {
   }
   if (pipeline === "live") $("price-note").textContent += " GPT Live uses Azure OpenAI's South India Global voice rate: $3/hour = $0.05/minute in this snapshot. Backend model usage is charged separately. GPT Live generates its own audio, so no Azure HD charge is added.";
   if (model.oss && (hosting === "byom" || book.usesGlobalReference)) $("price-note").textContent += " No OSS cached-input meter was found; reused text is conservatively charged at full input price.";
+  if (model.managedNativeOnly) $("price-note").textContent += " Azure Realtime models use native audio only in this calculator; no separate Azure STT, HD voice, or GPT Live session charge is added. Audio token rates remain editable assumptions, not verified Azure Realtime tokenization.";
+  if (model.tierAssumption) $("price-note").textContent += " Azure Realtime Fast uses the user-specified Voice Live Lite tier reference, not a verified published Fast tariff.";
 }
 
 function renderOverview(a, model, pipeline, result, book) {
@@ -121,6 +123,7 @@ function renderOverview(a, model, pipeline, result, book) {
   $("volume-note").textContent = `${a.calls.toLocaleString("en-US")} calls / ${(a.calls * a.duration / 60).toLocaleString("en-US")} minutes`;
   const badge = $("estimate-badge");
   badge.textContent = result.list === null ? "Missing rates" :
+    model.tierAssumption ? "Lite-tier assumption" :
     book.usesGlobalReference ? "AOAI Global reference" : "List-price estimate";
   badge.className = `badge${result.list === null ? "" : " good"}`;
   $("summary").textContent = result.missing.length ?
@@ -131,6 +134,9 @@ function renderOverview(a, model, pipeline, result, book) {
     book.usesGlobalReference ?
     "Managed tariff unavailable: showing an AOAI Global model-price + Central India BYO speech reference instead. This does not establish managed model support." :
     `Economic scenario only. ${$("hosting").value === "managed" ? `Central India managed-tier reference: ${model.tier || "unverified"}.` : "Model rates: South India Global. STT: Central India BYO reference."} Azure HD: Central India. Confirm model and transport availability.`;
+  if (model.managedNativeOnly) {
+    $("model-note").textContent = `${model.tierAssumption ? "User-specified Lite-tier reference, not a verified published Azure Realtime Fast tariff." : "Central India Voice Live Pro tier reference."} Native audio only; no separate STT/HD charge. Confirm regional availability and actual audio token rates.`;
+  }
 }
 
 function renderChart(a, pipeline, rates) {
@@ -163,7 +169,7 @@ function scenarios() {
   if (!defs.some(s => s.model.id === currentModel.id && s.pipeline === currentPipeline)) {
     defs.unshift({ model: currentModel, pipeline: currentPipeline });
   }
-  return defs;
+  return defs.filter(({ model, pipeline }) => supportsScenario(model, effectiveHosting(pipeline), pipeline));
 }
 
 function renderComparison(a) {
@@ -177,7 +183,7 @@ function renderComparison(a) {
     const liveMeter = pipeline === "live" ? snapshot.meters.find(m => m.meterName === GPT_LIVE_METER) : null;
     const row = element("tr");
     const title = element("td", model.name);
-    title.append(element("small", `${pipelines[pipeline]} / ${usesGlobalReference ? "AOAI GLOBAL REFERENCE (managed tariff unavailable)" : effectiveHosting(pipeline).toUpperCase()}${modelMeter?.armRegionName === "southindia" ? " / model: South India Global reference" : ""}${liveMeter ? " / voice: South India Global reference" : ""}`));
+    title.append(element("small", `${pipelines[pipeline]} / ${model.tierAssumption ? "USER-SPECIFIED LITE TIER REFERENCE" : usesGlobalReference ? "AOAI GLOBAL REFERENCE (managed tariff unavailable)" : effectiveHosting(pipeline).toUpperCase()}${modelMeter?.armRegionName === "southindia" ? " / model: South India Global reference" : ""}${liveMeter ? " / voice: South India Global reference" : ""}`));
     row.append(title);
     for (const prompt of PROMPTS) {
       const result = calculate({ ...a, prompt }, pipeline, rates);
@@ -187,7 +193,8 @@ function renderComparison(a) {
       row.append(cell);
       exportedRows.push({
         model: model.id, pipeline, hosting: effectiveHosting(pipeline), region: snapshot.region,
-        pricing_basis: usesGlobalReference ? "aoai-global-model-plus-byo-speech-reference" :
+        pricing_basis: model.tierAssumption ? "user-specified-voice-live-lite-reference" :
+          usesGlobalReference ? "aoai-global-model-plus-byo-speech-reference" :
           effectiveHosting(pipeline) === "managed" ? "voice-live-tier-reference" : "byom",
         prompt_tokens: prompt, silence_percent: a.silencePercent, list_per_call: result.list,
         list_per_minute: result.listPerMinute, missing_list_rates: result.missing.join("; "),
@@ -251,7 +258,10 @@ form.addEventListener("input", event => {
   if (event.target.tagName === "SELECT") return;
   update();
 });
-$("hosting").addEventListener("change", () => update(true));
+$("hosting").addEventListener("change", () => {
+  populateModels($("model").value);
+  update(true);
+});
 $("pipeline").addEventListener("change", () => {
   populateModels($("model").value);
   update(true);

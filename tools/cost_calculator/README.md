@@ -82,6 +82,16 @@ The GPT Live meter is hourly and is divided by 60 for USD-per-minute pricing.
   meter references**, not
   direct OpenAI model API prices. GPT Realtime 2.1 uses the Pro text-output-2
   meter; `gpt-realtime` uses the original output meter.
+- **Azure Realtime** uses the documented Voice Live **Pro** tier.
+  **Azure Realtime Fast** uses a **user-specified Lite-tier reference**,
+  not a verified published Fast tariff. Both use the existing Central India
+  tier text and native-audio meters, with no separate STT, Azure HD, or GPT Live
+  session charge. They appear in managed native speech-to-speech selection,
+  comparison, and CSV export only; no BYOM or alternate-pipeline prices are
+  inferred from GPT models. Fast's assumption is labeled in the UI and CSV.
+  The editable audio tokens/second remain planning assumptions, not verified
+  Azure Realtime-family tokenization. No price-snapshot refresh is required
+  for these existing tier meters.
 - When no managed tier is published, use the exact model's **AOAI Global
   inference prices + Central India BYO speech** as an economic reference.
   This fills GPT-5.4 mini/nano, GPT OSS 120B, and GPT-6 Sol reference scenarios.
