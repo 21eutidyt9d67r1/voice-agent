@@ -788,7 +788,7 @@ async def manage_agent(request, *, recreate=False, inspect=False):
 
 async def asset(request):
     name = request.match_info.get("file", "index.html")
-    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs", "weather.mjs"}:
+    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs", "weather.mjs", "city-scenes.mjs", "city-nature.mjs"}:
         raise web.HTTPNotFound()
     return web.FileResponse(ROOT / "public" / name)
 

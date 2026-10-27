@@ -30,6 +30,61 @@ notes, personalization, and advanced reset controls. The audio-processing notes
 distinguish requested browser processing from the saved Agent's Azure denoising;
 use **Show Agent settings** to inspect the actual saved definition.
 
+### Weather-aware city scenery
+
+Use the **City scene** selector in the floating scenery controls to choose
+Seattle, Mumbai, Tokyo, Paris, Beijing, or New York. The selector remains
+available in **Scenery only** view; press Escape or **Show panels** to return.
+Switching scenery never starts, stops, or reconfigures a voice session.
+The floating controls stay compact: a city selector, pause/view buttons, and
+one short weather line. Hover the weather line for the full observation;
+the selector's accessible description also retains weather and landmark details.
+
+| City | Recognizable scene | Birds and foliage |
+| --- | --- | --- |
+| Seattle | Space Needle, Mount Rainier, evergreen shoreline | Gulls, evergreen trees, maple leaves |
+| Mumbai | Gateway of India, palm-lined waterfront, warm streetlights | Soaring black kites, green palms and sparse windblown palm leaflets |
+| Tokyo | Red-and-white Tokyo Tower, layered city skyline | Small, fast-flapping sparrows and fan-shaped ginkgo leaves |
+| Paris | Eiffel Tower, mansard rooftops, Seine and stone bridge | Pigeons, broad plane-tree canopies and lobed plane leaves |
+| Beijing | Temple of Heaven's three blue roofs, marble terraces and courtyard | Long-tailed black-and-white magpies, cypresses and ginkgo |
+| New York | Brooklyn Bridge's twin Gothic towers and suspension cables, Manhattan skyline | Pigeons and pointed maple leaves |
+
+These are original procedural Canvas illustrations, not photographs or live
+camera feeds. Each city fetches its own current weather from Open-Meteo,
+including temperature, cloud cover, precipitation, wind speed and direction,
+and a timestamp in the city's timezone. Sky, haze, rain/snow, wet surfaces,
+water ripples, and wind-driven trees respond to those observations. Solar
+lighting uses the selected city's coordinates and the current UTC time, so
+day/night and twilight do not follow the browser's timezone. Building windows,
+streetlights, traffic, and boats add restrained animation; not every city has
+every animation (for example, Beijing is a courtyard, not a waterfront).
+
+Bird silhouettes and flight patterns follow the city profile: coastal gulls
+are not reused over Tokyo Tower or the Temple of Heaven. Birds shelter at night,
+in heavier rain, fog, snow, and in strong winds. Foliage follows the city's local calendar
+month: temperate broadleaf trees turn gold/ochre/red in autumn and become bare
+in winter, while Beijing's cypresses and Mumbai's palms stay green. Detached
+leaves appear near canopy height, use the matching leaf shape, and respond to
+wind; Mumbai has only a few green palm leaflets in stronger gusts, not an autumn
+leaf storm. These are illustrative local nature choices and calendar-based
+seasonal approximations, not live wildlife observations or measured leaf phenology.
+
+Weather refreshes every 15 minutes. A city switch cancels the previous request
+and clears its weather immediately, so a late response or failed lookup cannot
+apply one city's conditions to another. Until a city's first successful lookup,
+the canvas stays empty with a loading/unavailable message, rather than inventing
+sunny weather. A failed refresh for the same city retains its last observation
+and explicitly marks it stale. Weather requests time out after 10 seconds.
+
+Only the selected city ID is saved in browser local storage. No geolocation
+permission is requested. The city coordinates are sent to Open-Meteo without
+cookies or referrer; this is separate from the Agent's weather Toolbox and does
+not inject the selected city into the Agent's instructions. If browser storage
+is unavailable, scenery still works for the current page with a console warning.
+Use **Pause scenery** to freeze motion. Reduced-motion preferences are respected,
+animation pauses while the tab is hidden, and the canvas resolution is capped
+at twice CSS resolution to bound rendering work.
+
 | Transport | Audio path | Requirements |
 | --- | --- | --- |
 | WebSocket (default) | Browser → local backend → Azure; mono PCM16 at 24 kHz | Outbound secure WebSocket/HTTPS; no ICE |
@@ -641,13 +696,24 @@ node --check public\app.js
 node --check public\pcm-audio.mjs
 node --check public\pcm-capture.js
 node --check public\retained-history.mjs
-node --test test_text_input.mjs test_retained_history.mjs
+node --check public\weather.mjs
+node --check public\city-scenes.mjs
+node --check public\city-nature.mjs
+node --test test_text_input.mjs test_retained_history.mjs test_weather.mjs test_city_scenes.mjs test_city_nature.mjs
 ```
 
 Offline regressions cover session update/acknowledgment and preserved settings,
 both transports' input readiness, text input, per-item retained history, empty and
 repeated cuts, delayed full-answer events, retrieval/error/timeout races, and
 clear/reconnect behavior. They also check `store=true` and transport selection.
+Scenery checks cover per-city weather URLs and solar lighting, stale-request
+isolation, failed refreshes, native browser fetch binding, and deterministic
+landmark geometry at mobile and desktop sizes.
+Nature regressions cover city-specific bird and leaf silhouettes, local-month
+season changes, tropical/evergreen exceptions, and weather-dependent visibility.
+For visual checks, try all cities
+in normal and scenery-only views, pause/play, reduced motion, and a failed weather
+lookup; use controlled weather fixtures for rain, snow, fog, and night scenarios.
 Synthetic/offline UI verification is not an Azure audio test. An end-to-end Azure
 spoken interruption is **not verified by these tests**; run the connection check
 and the manual microphone repro in your own project.
