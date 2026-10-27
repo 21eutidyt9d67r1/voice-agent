@@ -16,6 +16,8 @@ param azureVoiceAgentName string = ''
 param azureApiVersion string
 @secure()
 param foundryFeatures string
+param gptLiveDeployment string = 'gpt-live-1'
+param gptLiveBackendDeployment string = 'gpt-5.4'
 @secure()
 param iceServersJson string
 param personalizationRequired bool = false
@@ -117,6 +119,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'FOUNDRY_FEATURES'
               value: foundryFeatures
+            }
+            {
+              name: 'GPT_LIVE_DEPLOYMENT'
+              value: gptLiveDeployment
+            }
+            {
+              name: 'GPT_LIVE_BACKEND_DEPLOYMENT'
+              value: gptLiveBackendDeployment
             }
             {
               name: 'ICE_SERVERS_JSON'

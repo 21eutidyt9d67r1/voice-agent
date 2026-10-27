@@ -65,6 +65,7 @@ test('Agent creation UI reports creation and enables required personalization', 
         {created:true, personalizationRequired:true, weatherEnabled:true}};
     },
   });
+
   ui.stop();
   await ui.prepareAgent();
   assert.equal(ui.element('agent-preparation').textContent, 'Your Agent is saved and ready.');
@@ -73,6 +74,71 @@ test('Agent creation UI reports creation and enables required personalization', 
   assert.equal(ui.element('weather-tool-hint').hidden, false);
   assert.deepEqual(requests[2], ['/api/agent/prepare', 'POST']);
 });
+
+test('GPT Live selection previews only its voices and omits independent transcription when saving', async () => {
+  const requests = [];
+  const ui = await setup('websocket', {
+    fetch: async (url, options) => {
+      if (options?.body) requests.push(JSON.parse(options.body));
+      return {ok:true, json:async()=>url === '/api/config' ? {configured:true, defaultTranscriptionModel:'mai-transcribe-2'} :
+        options?.method === 'POST' ?
+          {model:'gpt-live-1-test', modelChoice:'gpt-live-1', version:'2', transcriptionModel:null} :
+          {exists:true, model:'gpt-5.4', version:'1', transcriptionModel:'mai-transcribe-2'}};
+    },
+  });
+  ui.stop();
+  ui.element('agent-model-choice').value = 'gpt-live-1';
+  ui.element('agent-model-choice').onchange();
+  assert.equal(ui.element('live-voice').hidden, false);
+  assert.equal(ui.element('native-voice').hidden, true);
+  assert.equal(ui.element('voice').hidden, true);
+  assert.equal(ui.element('agent-transcription-choice').disabled, true);
+  assert.equal(ui.element('save-model').disabled, false);
+  await ui.element('save-model').onclick();
+  assert.deepEqual(requests, [{model:'gpt-live-1', version:'1'}]);
+  assert.equal(ui.element('agent-model').textContent, 'gpt-live-1-test');
+  assert.equal(ui.element('agent-model-choice').value, 'gpt-live-1');
+  assert.equal(ui.element('agent-transcription').textContent, 'Built into GPT Live');
+  assert.equal(ui.element('transport').value, 'websocket');
+  assert.equal(ui.element('transport').disabled, true);
+  ui.element('agent-model-choice').value = 'gpt-5.4';
+  ui.element('agent-model-choice').onchange();
+  assert.equal(ui.element('live-voice').hidden, true);
+  assert.equal(ui.element('voice').hidden, false);
+  assert.equal(ui.element('agent-transcription-choice').disabled, false);
+});
+
+for (const transport of ['websocket', 'webrtc']) {
+  test(`${transport}: GPT Live captions and audio bypass realtime retained-history and turn-taking`, async () => {
+    const ui = await setup(transport);
+    ui.session.live = true;
+    ui.session.userSpeaking = true;
+    ui.session.configured = true;
+    const played = [];
+    ui.session.audio = {play:delta=>played.push(delta), context:{state:'running'}, mute() {}, dispose() {}};
+    ui.markReady(ui.session);
+    await ui.handleEvent(ui.session, {type:'session.output_audio.delta', delta:'AAA='});
+    assert.deepEqual(played, ['AAA=']);
+    await ui.handleEvent(ui.session, {type:'session.input_transcript.delta', delta:'Hi', start_ms:0, end_ms:500});
+    await ui.handleEvent(ui.session, {type:'session.output_transcript.delta', delta:'Hello', start_ms:200, end_ms:600});
+    const captions = ui.element('transcript').children;
+    assert.equal(captions.length, 2);
+    assert.equal(captions[1].children[0].textContent, 'Agent - live caption (not retained history)');
+    assert.equal(captions[1].children[1].textContent, 'Hello');
+    ui.updateTextInput();
+    assert.equal(ui.element('text-input').disabled, true);
+    assert.equal(ui.element('send-text').disabled, true);
+    ui.element('text-input').value = 'Do not send realtime text';
+    ui.element('text-form').onsubmit({preventDefault() {}});
+    assert.equal(ui.sent.length, 0);
+    await ui.element('stop').onclick();
+    assert.equal(ui.sent[0].type, 'session.close');
+    assert.equal(ui.element('stop').disabled, true);
+    await ui.handleEvent(ui.session, {type:'session.closed', usage:{seconds:4}});
+    assert.equal(ui.element('status').textContent, 'Conversation ended');
+    assert.match(ui.element('hint').textContent, /4 seconds/);
+  });
+}
 
 test('Agent preparation failure is visible and never claims success', async () => {
   const ui = await setup('websocket', {

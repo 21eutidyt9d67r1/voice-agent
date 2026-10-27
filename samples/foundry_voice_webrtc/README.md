@@ -75,6 +75,8 @@ Set these values in this sample's own `.env` (not the parent samples directory):
 
 ```dotenv
 AZURE_AI_PROJECT_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT
+GPT_LIVE_DEPLOYMENT=gpt-live-1
+GPT_LIVE_BACKEND_DEPLOYMENT=gpt-5.4
 ```
 
 Leave `AZURE_VOICE_AGENT_NAME` unset or blank to use
@@ -135,7 +137,7 @@ sample without adding cross-replica creation coordination.
 ### Models, versions, and Agent YAML
 
 The **Version** line shows the saved Agent's current version. End the call, choose
-`gpt-realtime-2.1`, `azure-realtime`, or `gpt-5.4`, then select **Save new version**.
+`gpt-realtime-2.1`, `azure-realtime`, `gpt-5.4`, or **GPT Live**, then select **Save new version**.
 This publishes and enables a new version without deleting previous versions.
 Instructions, tools, metadata, and other configuration are preserved except for
 explicit transcription selections, turn-detection, and output-voice compatibility
@@ -148,6 +150,58 @@ continue to report the saved configuration until publication succeeds.
 `azure-realtime` uses native voice `ava` by default. Switching from native output
 to a GPT model selects `en-US-Tyler:DragonHDLatestNeural`. Other supported HD
 settings are preserved. Model and voice availability depend on the project.
+
+### GPT Live
+
+GPT Live uses a self-deployed `gpt-live-1` model and the separate native Live
+protocol, not the realtime protocol. Configure its actual deployment name with
+`GPT_LIVE_DEPLOYMENT` and its Responses backend with
+`GPT_LIVE_BACKEND_DEPLOYMENT` (default `gpt-5.4`). Both deployments must exist in
+the configured resource. For the `va-dev-use2` project, the verified endpoint is
+`https://va-dev-use2.services.ai.azure.com/api/projects/va-dev-use2-project` and
+the Live deployment is `gpt-live-1-test`.
+
+Selecting **GPT Live** previews its native voice selector, defaulting to `marin`.
+Its choices follow the OpenAI SDK's
+[Live BuiltInVoice catalog](https://github.com/openai/openai-python/blob/main/src/openai/types/live/built_in_voice.py);
+availability depends on the deployed model. Unsupported voices fail explicitly,
+without substituting an Azure Speech or Azure Realtime voice. Saving the model
+publishes a Live version with a Responses backend and `web_search` for weather
+and current information. It does not attach the realtime weather Toolbox.
+The source instructions are supplied to that backend; its original complete
+realtime definition remains in the previous version. Version metadata records
+that source version so switching back restores its prompt, structured inputs,
+greeting, tools, audio settings and transcription before applying the selected
+realtime model/transcription.
+The deployment script passes both Live deployment settings to Azure Container
+Apps, and `check_websocket.py` detects Live Agents and checks native startup
+and graceful close without sending microphone audio.
+
+GPT Live uses **WebSocket audio only** in this sample. The target project's
+saved-Agent Live WebRTC session-creation route returns HTTP 405, and its
+realtime WebRTC signaling route rejects a Live Agent. The UI selects and locks
+WebSocket for Live, while other models retain both transports. No direct-model
+fallback bypasses the saved Agent or its Foundry conversation recording.
+WebSocket startup waits for `session.started` and streams native
+`session.input_audio.append` / `session.output_audio.delta` events through the
+Agent's `/endpoint/protocols/voice/live/sessions` WebSocket endpoint.
+Credentials never leave the server. **End** sends `session.close` and waits
+for final cumulative usage.
+
+GPT Live listens and speaks concurrently. Its timed transcript fragments are
+shown as **captions, not authoritative retained history**; there is no realtime
+truncation handshake or complete-turn guarantee. Independent transcription,
+text-only replies, and realtime conversation-item retrieval are disabled for
+Live. Browser echo cancellation/noise suppression still apply, but the
+realtime Agent's Azure headset denoiser/VAD settings do not. Optional
+personalization becomes trusted language-policy and untrusted-context append
+events after `session.started`, rather than a realtime AI greeting. The bridge
+waits for their acknowledgments before enabling microphone input; browsers
+cannot submit arbitrary instruction events.
+The [direct-model Live WebRTC guide](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/gpt-live-webrtc)
+does not establish support for saved-Agent WebRTC. See the
+[event reference](https://learn.microsoft.com/en-us/azure/foundry/openai/gpt-live-reference)
+for Live audio and session events.
 
 Use **Transcription model** to select input speech recognition independently of
 the Agent model, then select **Save new version**. **Transcription** shows the

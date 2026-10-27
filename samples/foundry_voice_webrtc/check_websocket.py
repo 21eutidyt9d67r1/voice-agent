@@ -6,7 +6,38 @@ import json
 import aiohttp
 
 from auth import AzureCliTokenProvider
-from server import SessionConfiguration, connect_voice, describe_connection_error, load_settings
+from live import LiveSessionError, live_session_url
+from server import (SessionConfiguration, connect_voice, describe_connection_error,
+                    load_settings, lookup_configured_agent)
+
+
+async def check_live(client, cfg, headers, version):
+    params = {"api-version": cfg.api_version, "x-agent-version-override": version}
+    started = False
+    events = []
+    async with client.ws_connect(live_session_url(cfg).replace("https://", "wss://", 1),
+                                 headers=headers, params=params) as ws:
+        async for message in ws:
+            if message.type != aiohttp.WSMsgType.TEXT:
+                continue
+            event = json.loads(message.data)
+            kind = event.get("type")
+            events.append(kind)
+            if kind == "session.started":
+                audio = (event.get("session") or {}).get("audio") or {}
+                if audio.get("format") != {"type": "audio/pcm", "rate": 24000}:
+                    raise LiveSessionError("GPT Live did not negotiate PCM16 at 24 kHz.")
+                started = True
+                await ws.send_json({"type": "session.close"})
+            elif kind == "session.closed":
+                print(json.dumps({"ok": started and event.get("reason") != "connection_lost",
+                                  "stage": "session_closed", "events": events,
+                                  "usage": event.get("usage"),
+                                  "note": "GPT Live startup and graceful close checked; no microphone audio was sent."}))
+                return 0 if started and event.get("reason") != "connection_lost" else 1
+            elif kind == "error":
+                break
+    raise LiveSessionError("GPT Live diagnostic ended without a successful startup and graceful close.")
 
 
 async def check():
@@ -22,6 +53,12 @@ async def check():
             async with aiohttp.ClientSession() as client:
                 provider = AzureCliTokenProvider()
                 token = await provider.get_token(client)
+                headers = {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}
+                stage = "agent_lookup"
+                latest = await lookup_configured_agent(client, cfg, headers, include_version=True)
+                if latest is not None and latest["definition"].get("sub_protocol") == "live":
+                    stage = "live_startup"
+                    return await check_live(client, cfg, headers, latest["version"])
                 stage = "websocket_upgrade"
                 async with connect_voice(client, cfg, {"Authorization": f"Bearer {token}",
                         "Foundry-Features": cfg.features}, "websocket") as ws:

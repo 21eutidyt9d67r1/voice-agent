@@ -4,6 +4,7 @@ import { RetainedHistory } from './retained-history.mjs';
 const $ = (id) => document.getElementById(id);
 let config, call = null;
 const messages = new Map();
+const modelChoices = ['gpt-realtime-2.1', 'azure-realtime', 'gpt-5.4', 'gpt-live-1'];
 let preparingAgent = false;
 let agentAvailability = 'unknown';
 let savedModel = null, savedVersion = null, savedTranscription = null, latestDownload = null, downloading = false;
@@ -15,37 +16,52 @@ function updateAgentControls() {
     agentAvailability === 'error' ? 'Retry setup & start' : 'Start conversation';
   $('recreate-agent').disabled = busy || !config?.configured || !config?.agentRecreateAllowed || agentAvailability !== 'ready';
   $('agent-model-choice').disabled = busy || agentAvailability !== 'ready';
-  $('agent-transcription-choice').disabled = busy || agentAvailability !== 'ready';
+  const live = $('agent-model-choice').value === 'gpt-live-1';
+  $('agent-transcription-choice').disabled = busy || agentAvailability !== 'ready' || live;
   $('save-model').disabled = busy || agentAvailability !== 'ready' || !savedVersion ||
-    !['gpt-realtime-2.1', 'azure-realtime', 'gpt-5.4'].includes($('agent-model-choice').value) ||
-    !$('agent-transcription-choice').value ||
-    ($('agent-model-choice').value === savedModel && $('agent-transcription-choice').value === savedTranscription);
+    !modelChoices.includes($('agent-model-choice').value) ||
+    (!live && !$('agent-transcription-choice').value) ||
+    ($('agent-model-choice').value === savedModel && (live || $('agent-transcription-choice').value === savedTranscription));
   $('show-settings').disabled = preparingAgent || agentAvailability !== 'ready';
   $('download-conversation').disabled = Boolean(call) || downloading || !latestDownload;
+  $('transport').disabled = busy || savedModel === 'gpt-live-1';
 }
 
 function updateVoiceChoices(model) {
   const native = model === 'azure-realtime';
-  $('voice').hidden = native;
+  const live = model === 'gpt-live-1';
+  $('voice').hidden = native || live;
   $('native-voice').hidden = !native;
-  $('native-voice').disabled = Boolean(call) || !native;
-  $('voice-label').htmlFor = native ? 'native-voice' : 'voice';
+  $('live-voice').hidden = !live;
+  for (const id of ['voice', 'native-voice', 'live-voice']) $(id).disabled = Boolean(call) || $(id).hidden;
+  $('voice-label').htmlFor = live ? 'live-voice' : native ? 'native-voice' : 'voice';
+  $('live-model-hint').hidden = !live;
 }
 
 function applyAgentDetails(result) {
-  savedModel = typeof result.model === 'string' ? result.model : null;
+  savedModel = result.modelChoice || (typeof result.model === 'string' ? result.model : null);
   savedVersion = typeof result.version === 'string' ? result.version : null;
   savedTranscription = typeof result.transcriptionModel === 'string' ? result.transcriptionModel : null;
-  $('agent-transcription').textContent = savedTranscription ?
+  $('agent-transcription').textContent = savedModel === 'gpt-live-1' ? 'Built into GPT Live' : savedTranscription ?
     savedTranscription + (result.exists === false ? ' (after setup)' : '') : 'Unavailable';
-  $('agent-transcription-choice').value = savedTranscription || '';
+  $('agent-transcription-choice').value = savedTranscription || (savedModel === 'gpt-live-1' ? config.defaultTranscriptionModel || 'mai-transcribe-2' : '');
   $('agent-version').textContent = savedVersion || (result.exists === false ? 'Not created' : 'Unavailable');
-  $('agent-model-choice').value = ['gpt-realtime-2.1', 'azure-realtime', 'gpt-5.4'].includes(savedModel) ?
+  $('agent-model-choice').value = modelChoices.includes(savedModel) ?
     savedModel : 'gpt-realtime-2.1';
   updateVoiceChoices(savedModel);
   $('agent-model').textContent = typeof result.model === 'string' && result.model.trim() ?
     result.model + (result.exists === false ? ' (after setup)' : '') : 'Unavailable';
   $('weather-tool-hint').hidden = !(result.weatherEnabled || result.exists === false);
+  if (savedModel === 'gpt-live-1') {
+    $('transport').value = 'websocket';
+    $('transport').onchange?.();
+  }
+  $('text-help').textContent = savedModel === 'gpt-live-1' ?
+    'GPT Live uses microphone input and spoken replies. Text-only replies are unavailable.' :
+    "Start a conversation to send text. Press Enter or Send for a text-only reply; wait for the agent's response before sending another message. Mute the mic to use text only.";
+  $('history-help').textContent = savedModel === 'gpt-live-1' ?
+    'GPT Live captions are timed speech fragments, not complete turns or authoritative retained history. Listening and speaking can overlap.' :
+    "Replies stream here as live drafts. After an interruption, only the service's retained text remains; unheard text is removed.";
   if (result.personalizationRequired) {
     config.personalizationRequired = true;
     $('personalize').checked = true;
@@ -62,7 +78,7 @@ async function saveAgentModel() {
     const response = await fetch('/api/agent/model', {method:'POST', signal:AbortSignal.timeout(95000),
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({model:$('agent-model-choice').value, version:savedVersion,
-        transcriptionModel:$('agent-transcription-choice').value})});
+        ...($('agent-model-choice').value === 'gpt-live-1' ? {} : {transcriptionModel:$('agent-transcription-choice').value})})});
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not save the model version.');
     applyAgentDetails(result);
@@ -196,15 +212,15 @@ async function prepareAgent(recreate = false) {
 }
 
 function updateTextInput() {
-  const enabled = call?.ready && call.ws?.readyState === WebSocket.OPEN && !call.responding && !call.userSpeaking;
-  $('text-input').disabled = !call?.ready || call.ws?.readyState !== WebSocket.OPEN;
+  const enabled = call?.ready && !call.live && !call.closing && call.ws?.readyState === WebSocket.OPEN && !call.responding && !call.userSpeaking;
+  $('text-input').disabled = !call?.ready || call.live || call.closing || call.ws?.readyState !== WebSocket.OPEN;
   $('send-text').disabled = !enabled || !$('text-input').value.trim();
 }
 function sendText(event) {
   event.preventDefault();
   const session = call;
   const text = $('text-input').value.trim();
-  if (!session?.ready || session.ws?.readyState !== WebSocket.OPEN || session.responding || session.userSpeaking || !text) return;
+  if (!session?.ready || session.live || session.closing || session.ws?.readyState !== WebSocket.OPEN || session.responding || session.userSpeaking || !text) return;
   if (text.length > 4000) {
     showError('Text input must contain at most 4000 characters.');
     return;
@@ -241,6 +257,7 @@ function transcript(record) {
     messages.set(record, entry);
   }
   const labels = {
+    caption:'Agent - live caption (not retained history)',
     live:'Agent - live draft', complete:'Agent', truncated: text ? 'Agent - retained after interruption' : 'Agent - interrupted, no text retained',
     pending:'Agent - interrupted, retrieving retained text', unavailable:'Agent - retained history unavailable',
   };
@@ -264,7 +281,7 @@ function createHistory(session) {
 function stop(title = 'Conversation ended', hint = 'Start again whenever you’re ready.') {
   const old = call; call = null;
   if (old) {
-    clearTimeout(old.timeout); clearTimeout(old.disconnectTimer); clearInterval(old.clock);
+    clearTimeout(old.timeout); clearTimeout(old.disconnectTimer); clearTimeout(old.closeTimer); clearInterval(old.clock);
     old.history?.dispose();
     old.abort.abort(); old.ws?.close(); old.peer?.close(); old.audio?.dispose();
     old.mic?.getTracks().forEach(t => t.stop()); old.remote?.getTracks().forEach(t => t.stop());
@@ -272,13 +289,30 @@ function stop(title = 'Conversation ended', hint = 'Start again whenever you’r
   $('remote-audio').pause(); $('remote-audio').srcObject = null;
   $('orb').className = 'orb'; $('play').hidden = true;
   updateAgentControls(); $('stop').disabled = true; $('mute').disabled = true;
-  $('transport').disabled = false;
+  $('transport').disabled = savedModel === 'gpt-live-1';
   $('personalization').disabled = false;
-  $('voice').disabled = false;
-  $('native-voice').disabled = $('native-voice').hidden;
+  updateVoiceChoices(savedModel);
   $('mute').textContent = 'Mute mic'; $('mute').setAttribute('aria-pressed', 'false');
   updateTextInput();
   state(title, hint, 'Offline');
+}
+function endCall() {
+  const session = call;
+  if (!session?.live || !session.ready || session.ws?.readyState !== WebSocket.OPEN) return stop();
+  if (session.closing) return;
+  session.closing = true;
+  session.ready = false;
+  session.mic?.getAudioTracks().forEach(track => { track.enabled = false; });
+  session.audio?.mute(true);
+  $('stop').disabled = true;
+  $('mute').disabled = true;
+  updateTextInput();
+  state('Ending conversation', 'Waiting for GPT Live to confirm final usage.', 'Closing');
+  session.ws.send(JSON.stringify({type:'session.close'}));
+  session.closeTimer = setTimeout(() => {
+    stop('Conversation ended', 'GPT Live did not confirm final session usage.');
+    showError('GPT Live close acknowledgment timed out; final usage is unconfirmed.');
+  }, 16000);
 }
 function fail(session, error) {
   if (call !== session) return;
@@ -300,7 +334,8 @@ function markReady(session) {
   clearTimeout(session.timeout); clearTimeout(session.disconnectTimer);
   $('mute').disabled = false; $('orb').className = 'orb active';
   updateTextInput();
-  state('Listening', 'Say hello or send a text message. Your agent will respond.', 'Connected');
+  state('Listening', session.live ? 'Speak naturally. GPT Live can listen and speak at the same time.' :
+    'Say hello or send a text message. Your agent will respond.', 'Connected');
   if (!session.clock) {
     const began = Date.now();
     session.clock = setInterval(() => {
@@ -310,7 +345,7 @@ function markReady(session) {
   }
 }
 function openSocket(session, onOpen) {
-  const ws = session.ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/voice?transport=${session.transport}${session.personalization ? '&personalize=true' : ''}${session.voice ? `&voice=${encodeURIComponent(session.voice)}` : ''}`);
+  const ws = session.ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/voice?transport=${session.transport}${session.live ? '&protocol=live' : ''}${session.personalization ? '&personalize=true' : ''}${session.voice ? `&voice=${encodeURIComponent(session.voice)}` : ''}`);
   ws.onopen = () => {
     if (call !== session) return;
     if (session.personalization) ws.send(JSON.stringify(session.personalization));
@@ -319,7 +354,11 @@ function openSocket(session, onOpen) {
   let queue = Promise.resolve();
   ws.onmessage = e => { queue = queue.then(() => handleEvent(session, JSON.parse(e.data))).catch(error => fail(session,error)); };
   ws.onerror = () => fail(session,new Error('Local WebSocket connection failed. Check that the sample server is running.'));
-  ws.onclose = () => { if (call === session) stop('Session closed', 'The service ended the session. You can start a new one.'); };
+  ws.onclose = () => {
+    if (call !== session) return;
+    stop('Session closed', 'The service ended the session. You can start a new one.');
+    if (session.live && !session.closed) showError('GPT Live disconnected without confirming final session usage.');
+  };
 }
 function waitForIce(peer, signal) {
   if (peer.iceGatheringState === 'complete') return Promise.resolve();
@@ -355,6 +394,31 @@ async function connectWebRtc(session) {
 async function handleEvent(session, event) {
   if (call !== session) return;
   const type = event.type || '';
+  if (session.live && type.startsWith('session.')) {
+    if (type === 'session.input_transcript.delta' || type === 'session.output_transcript.delta') {
+      const role = type === 'session.input_transcript.delta' ? 'user' : 'assistant';
+      let record = session.liveCaption;
+      if (!record || record.role !== role || event.start_ms - record.end > 1000) {
+        record = session.liveCaption = {role, text:'', status:'caption'};
+      }
+      record.text += event.delta || '';
+      record.end = event.end_ms;
+      transcript(record);
+    } else if (type === 'session.output_audio.delta' && session.audio) {
+      session.audio.play(event.delta);
+      if (session.audio.context.state === 'suspended') $('play').hidden = false;
+    } else if (type === 'session.closed') {
+      session.closed = true;
+      stop('Conversation ended', `GPT Live final cumulative voice usage: ${event.usage?.seconds ?? 'unavailable'} seconds.`);
+    }
+    return;
+  }
+  if (session.live && type === 'response.event') {
+    if (['error', 'response.failed', 'response.incomplete'].includes(event.event?.type)) {
+      showError('The GPT Live reasoning backend failed. Check its deployment and web search configuration.');
+    }
+    return;
+  }
   const historyHandled = session.history.handle(event);
   if (type === 'bridge.conversation') {
     if (typeof event.downloadToken !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(event.conversationId)) {
@@ -434,11 +498,14 @@ async function start() {
     english_only:$('english-only').checked,
   } : null;
   const session = {abort:new AbortController(), muted:false, transport:$('transport').value, ready:false, personalization,
-    voice:$('native-voice').hidden ? $('voice').value : $('native-voice').value}; call = session;
+    live:savedModel === 'gpt-live-1',
+    voice:savedModel === 'gpt-live-1' ? $('live-voice').value :
+      savedModel === 'azure-realtime' ? $('native-voice').value : $('voice').value}; call = session;
   session.history = createHistory(session);
   $('personalization').disabled = true;
   $('voice').disabled = true;
   $('native-voice').disabled = true;
+  $('live-voice').disabled = true;
   updateAgentControls();
   $('error').hidden = true; $('start').disabled = true; $('stop').disabled = false;
   $('transport').disabled = true; $('elapsed').textContent = '00:00';
@@ -470,7 +537,7 @@ async function start() {
           fail(session, new Error('Audio upload cannot keep up. Check the network and start a new session.'));
           return;
         }
-        session.ws.send(JSON.stringify({type:'input_audio_buffer.append', audio}));
+        session.ws.send(JSON.stringify({type:session.live ? 'session.input_audio.append' : 'input_audio_buffer.append', audio}));
       });
       if (call !== session) return;
       state('Connecting to Azure', 'Opening an audio WebSocket. No STUN or TURN needed.', 'Connecting');
@@ -519,7 +586,7 @@ $('recreate-agent').onclick = async () => {
 if (typeof navigator !== 'undefined') $('client-language').value = navigator.language?.toLowerCase().startsWith('es') ? 'es-ES' : 'en-US';
 $('text-form').onsubmit = sendText;
 $('text-input').oninput = updateTextInput;
-$('stop').onclick = () => stop();
+$('stop').onclick = endCall;
 $('play').onclick = playAudio;
 $('mute').onclick = () => {
   if (!call?.mic) return;
@@ -527,9 +594,10 @@ $('mute').onclick = () => {
   call.audio?.mute(call.muted);
   $('mute').textContent = call.muted ? 'Unmute mic' : 'Mute mic';
   $('mute').setAttribute('aria-pressed', String(call.muted));
-  $('hint').textContent = call.muted ? 'Your microphone is muted. You can still type and hear the agent.' : 'Say hello or send a text message. Your agent will respond.';
+  $('hint').textContent = call.muted ? `Your microphone is muted. You can still ${call.live ? 'hear the agent.' : 'type and hear the agent.'}` :
+    call.live ? 'Speak naturally. GPT Live can listen and speak at the same time.' : 'Say hello or send a text message. Your agent will respond.';
 };
-$('clear').onclick = () => { call?.history.clear(); messages.clear(); $('transcript').replaceChildren(); };
+$('clear').onclick = () => { call?.history.clear(); if (call) call.liveCaption = null; messages.clear(); $('transcript').replaceChildren(); };
 window.addEventListener('pagehide', () => stop());
 $('transport').onchange = () => {
   $('media').textContent = $('transport').value === 'websocket' ? 'WebSocket · PCM16 / 24 kHz' : 'WebRTC · Opus';

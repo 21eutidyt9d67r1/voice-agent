@@ -79,6 +79,12 @@ try {
     if ($settings.ContainsKey("ICE_SERVERS_JSON")) {
         $commonParameters += "iceServersJson=$($settings['ICE_SERVERS_JSON'])"
     }
+    if ($settings.ContainsKey("GPT_LIVE_DEPLOYMENT")) {
+        $commonParameters += "gptLiveDeployment=$($settings['GPT_LIVE_DEPLOYMENT'])"
+    }
+    if ($settings.ContainsKey("GPT_LIVE_BACKEND_DEPLOYMENT")) {
+        $commonParameters += "gptLiveBackendDeployment=$($settings['GPT_LIVE_BACKEND_DEPLOYMENT'])"
+    }
     $commonParameters += "personalizationRequired=$($settings['PERSONALIZATION_REQUIRED'] -eq 'true')".ToLowerInvariant()
     $commonParameters += "allowAgentRecreate=$($settings['ALLOW_AGENT_RECREATE'] -eq 'true')".ToLowerInvariant()
 
