@@ -186,8 +186,8 @@ async function prepareAgent(recreate = false) {
   preparingAgent = true;
   updateAgentControls();
   $('error').hidden = true;
-  $('agent-preparation').textContent = recreate ? 'Resetting your Agent and preparing weather tools...' :
-    agentAvailability === 'missing' ? 'Preparing weather tools, then creating and saving your Agent...' : 'Getting your Agent ready...';
+  $('agent-preparation').textContent = recreate ? 'Resetting your Agent and preparing web search tools...' :
+    agentAvailability === 'missing' ? 'Preparing web search tools, then creating and saving your Agent...' : 'Getting your Agent ready...';
   try {
     const response = await fetch(recreate ? '/api/agent/recreate' : '/api/agent/prepare', {
       method:'POST', signal:AbortSignal.timeout(95000),

@@ -1,11 +1,11 @@
 {
-  "description": "Search the web for current weather conditions and forecasts for the caller's requested location.",
+  "description": "Search the web for information on any topic, including news, products, prices, documentation, travel, local information, and weather.",
   "tools": [
     {
       "type": "web_search",
       "name": "weather",
-      "description": "Search for current weather conditions or forecasts. Include the caller's city, country or region, and requested date in the search query."
+      "description": "Search the web whenever the caller requests a lookup or facts need verification. Search is not limited to weather. Include a location or date only when relevant to the question; for weather, include the requested city, country or region, and date."
     }
   ],
-  "metadata": {"sample": "foundry_voice_webrtc", "purpose": "weather"}
+  "metadata": {"sample": "foundry_voice_webrtc", "purpose": "web-search"}
 }

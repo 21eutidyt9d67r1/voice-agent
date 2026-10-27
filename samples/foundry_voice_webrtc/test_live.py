@@ -51,6 +51,9 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(backend["model"], "gpt-5.4")
         self.assertEqual(backend["tools"], [{"type": "web_search"}])
         self.assertNotIn("{{", backend["instructions"])
+        self.assertIn("web search on any topic", live["instructions"])
+        self.assertIn("search is not limited to weather or current events", backend["instructions"])
+        self.assertIn("only when the requested search needs it", backend["instructions"])
 
     def test_personalization_is_trusted_policy_then_bounded_untrusted_context(self):
         values = {"language_policy": "Use English.", "display_name": "A", "client_language": "en-US",

@@ -113,10 +113,23 @@ class PersonalizationTests(unittest.TestCase):
         self.assertEqual(definition["audio"]["input"]["turn_detection"]["type"], "azure_semantic_vad")
         self.assertIn("Answer only the caller's latest request", definition["instructions"])
         self.assertIn("Do not offer to set reminders", definition["instructions"])
-        self.assertIn("Before invoking the weather tool, speak one short acknowledgement", definition["instructions"])
+        self.assertIn("Before invoking web search, speak one short acknowledgement", definition["instructions"])
         self.assertIn("Say it only once per lookup request", definition["instructions"])
         self.assertIn("Follow the language policy above", definition["instructions"])
         self.assertNotIn("interim_response", definition)
+
+    def test_web_search_prompt_and_toolbox_cover_topics_beyond_weather(self):
+        root = Path(__file__).parent
+        instructions = json.loads((root / "personalized-agent.json").read_text())["instructions"]
+        toolbox = json.loads((root / "weather-toolbox.json").read_text())
+        self.assertIn("Search is not limited to weather", instructions)
+        self.assertIn("only when the requested search needs it", instructions)
+        self.assertIn("When a web search finishes", instructions)
+        for topic in ("news", "products", "prices", "documentation", "travel"):
+            self.assertIn(topic, instructions)
+            self.assertIn(topic, toolbox["description"])
+        self.assertEqual(toolbox["tools"][0]["type"], "web_search")
+        self.assertIn("not limited to weather", toolbox["tools"][0]["description"])
 
     def test_personalization_is_not_a_mid_call_event(self):
         for transport in ("websocket", "webrtc"):

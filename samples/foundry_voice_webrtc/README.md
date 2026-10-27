@@ -176,7 +176,7 @@ and the selected Azure Speech HD output voice. Azure semantic turn detection
 keeps the headset noise-reduction processing on the service-owned audio path;
 GPT Realtime's upstream-owned `server_vad` rejects that denoiser.
 The Agent speaks one brief acknowledgement, such as "Let me check that for
-you," before invoking the weather tool. The saved prompt makes it follow the
+you," before invoking web search on any topic. The saved prompt makes it follow the
 session language policy and keeps the filler out of the final answer. This is
 model-generated speech from the Agent, not browser speech synthesis or an
 extra client response request. This explicit pre-tool prompt is used instead
@@ -221,8 +221,11 @@ Its choices follow the OpenAI SDK's
 [Live BuiltInVoice catalog](https://github.com/openai/openai-python/blob/main/src/openai/types/live/built_in_voice.py);
 availability depends on the deployed model. Unsupported voices fail explicitly,
 without substituting an Azure Speech or Azure Realtime voice. Saving the model
-publishes a Live version with a Responses backend and `web_search` for weather
-and current information. It does not attach the realtime weather Toolbox.
+publishes a Live version with a Responses backend and `web_search` for any topic,
+including news, products, prices, documentation, travel, local information, and
+weather. Explicit lookup requests and facts needing verification trigger search;
+it is not limited to weather or current events. It does not attach the realtime
+weather Toolbox.
 The source instructions are supplied to that backend; its original complete
 realtime definition remains in the previous version. Version metadata records
 that source version so switching back restores its prompt, structured inputs,
@@ -293,11 +296,13 @@ read/create/enable permission. An invoke-only identity is not sufficient for thi
 configured name is the only creation target, but anyone with access to the demo
 can trigger preparation; use Entra sign-in for deployments outside a controlled demo.
 
-### Weather through Foundry Toolbox
+### General web search through Foundry Toolbox
 
-Weather is part of the normal Agent setup, not a browser-side function or a
-separate weather API. Before publishing a new demo Agent, the backend checks for
-the **weather** Toolbox in the same Foundry project:
+Web search is part of the normal Agent setup, not a browser-side function or a
+weather-only API. The Toolbox retains its legacy **weather** name for
+compatibility, but its prompt and tool descriptions allow searches on any topic.
+Before publishing a new demo Agent, the backend checks for this Toolbox in the
+same Foundry project:
 
 - If present, it validates that the latest immutable version contains a
   `web_search` tool and pins that exact version in the Agent.
@@ -306,21 +311,28 @@ the **weather** Toolbox in the same Foundry project:
 - Permission errors, incompatible Toolboxes, or failed creation stop setup
   visibly; an existing Toolbox is never overwritten.
 
-The Agent uses web search through Foundry Toolbox for current conditions and
-forecasts. It asks for a location when needed and must ground its reply in tool
-results rather than inventing weather. Try **"What is the weather in Seattle
-today?"** after starting a conversation. These are web-search results, not a
-dedicated meteorological-feed SLA.
+The Agent searches when the caller requests a lookup or facts need verification,
+then gives a concise answer grounded in the results. It asks for a location or
+date only when relevant to the question, not before every search. Try **"Search
+the web for the latest Azure AI announcements"** or **"Find the official Python
+asyncio documentation"**. Weather searches retain location/date guidance; try
+**"What is the weather in Seattle today?"**. Weather results are web-search
+results, not a dedicated meteorological-feed SLA.
 
 The Toolbox and Agent stay saved for future sessions; repeated setup does not
 publish extra versions. Reset checks the weather dependency before deleting an
 Agent and does not delete the shared Toolbox. If Agent publication fails after
 Toolbox creation, retry setup to reuse that Toolbox.
 
-Existing Agent definitions remain unchanged. To add weather to an older demo
-Agent, explicitly use **Advanced → Reset Agent**, or choose a new Agent name.
-Reset removes previous Agent versions after confirmation. The UI advertises
-weather for new demo setup or when the saved Agent has the weather reference.
+Existing saved definitions remain unchanged when local templates are edited.
+To broaden an existing weather-only Agent, publish a new Toolbox version with
+the general-search descriptions, then publish an Agent version with the updated
+prompt and pinned Toolbox version; no reset or deletion is required. For a Live
+Agent, update both its speech instructions and Responses backend instructions.
+If it has a `realtime_source_version`, publish the updated realtime source too
+and point the Live version's metadata to it, so switching back retains general
+search. The UI advertises web search for new demo setup or when the saved Agent
+has the legacy weather reference.
 If publishing `personalized-agent.json` manually, provision the referenced
 Toolbox first; automatic setup resolves the actual immutable version for you.
 
