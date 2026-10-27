@@ -7,26 +7,27 @@ company, Contoso, as a staged handoff graph. It is the same conversation design
 that the Microsoft Foundry **Survey and feedback intake** template creates.
 
 By default, its one business tool runs on the shared **mock-tool-call** MCP
-server: a Salesforce search that matches the confirmed feedback to the
-respondent's customer record. The mock takes the same arguments and returns the
-same fields as the real tool, but results are fictional. The tool only reads;
-the answers are noted for the team, never saved or submitted. To connect real
+server: a read-only Salesforce search that checks whether the respondent has a
+customer record. The mock takes the same arguments and returns the same fields
+as the real tool, but results are fictional. There is no feedback write
+integration: the agent says up front and when closing that the feedback stays
+unsubmitted, and never says it was noted, saved, or sent to the team. To connect real
 systems, use **Connect my tools** in the Portal Editor or a Foundry Toolbox in your
 own Project; see [Connect real tools](../../docs/05_connect_real_tools.md).
 
 ## When to use this example
 
 Use it to try consent handling, scaled questions, a confirmed summary, and a
-read-only CRM match.
+read-only CRM lookup.
 
 ## Workflow
 
 | Stage | Purpose |
 | --- | --- |
-| `intro_consent` | Mention the recent support call and ask for about three minutes. |
+| `intro_consent` | Mention the recent support call, explain that the feedback stays unsubmitted, and ask for about three minutes. |
 | `questions` | Ask each question in order, one at a time, and wait for the answer. |
-| `polite_decline` | Thank a respondent who declines and end without pressure. |
-| `summary` | Read back the scores and comments, then match the confirmed feedback to the customer record. |
+| `polite_decline` | Thank a respondent who declines or asks to stop and end without pressure; a removal request is acknowledged, never claimed as processed. |
+| `summary` | Read back the scores and comments, check whether a customer record exists, and say the feedback remains unsubmitted. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
 Every stage can route to `end` as soon as the caller says goodbye or asks to
@@ -71,12 +72,15 @@ for each system.
 
 - "Sure." Then answer "4", "8", "Shorter hold times", and "No." Expect one
   question at a time and a summary read back.
-- "Yes, that's right." Expect one `mock_tool_call_salesforce_search` call and
-  the feedback described as matched to the customer record and noted for the
-  team, never "saved".
+- "Yes, that's right." Expect one `mock_tool_call_salesforce_search` call,
+  only that a customer record was found, and that the feedback remains
+  unsubmitted and has not been saved or sent to the team; never "noted" or
+  "saved".
 - "Actually, make the first score a 3." Expect the corrected part read back
   before any tool call.
 - "I don't have time." Expect a graceful goodbye with no tool call.
+- "Please take me off your list." Expect the request acknowledged without a
+  claim that it was sent to the team or processed, and no further question.
 - "That's all I have time for." Expect the summary straight away.
 
 ## Boundaries

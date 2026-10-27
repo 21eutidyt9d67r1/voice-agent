@@ -3,16 +3,16 @@
 ## Conclusion
 
 `agent.json` is a Voice Agent for a fictional restaurant, Contoso Kitchen, that
-takes phone orders as a staged handoff graph. It is the same conversation
+prepares unsubmitted phone order summaries as a staged handoff graph. It is the same conversation
 design that the Microsoft Foundry **Restaurant phone order taker** template
 creates.
 
 By default, its one business tool runs on the shared **mock-tool-call** MCP
 server: a Twilio SMS tool that texts the order summary when the caller asks
 for it. The mock takes the same arguments and returns the same fields as the
-real tool, but results are fictional and no text is delivered. The order is
-noted for the kitchen, not submitted to an ordering system, and no payment is
-taken. To connect real systems, use **Connect my tools** in the Portal Editor or a
+real tool, but results are fictional and no text is delivered. The call cannot
+place an order: the agent says the summary is unsubmitted and has not been sent
+to or accepted by the kitchen, and no payment is taken. To connect real systems, use **Connect my tools** in the Portal Editor or a
 Foundry Toolbox in your own Project; see
 [Connect real tools](../../docs/05_connect_real_tools.md).
 
@@ -25,10 +25,10 @@ confirmed SMS summary with a failure path.
 
 | Stage | Purpose |
 | --- | --- |
-| `greeting` | Find out whether the order is for pickup or delivery. |
+| `greeting` | Explain that the call prepares an unsubmitted order summary, then find out whether it is for pickup or delivery. |
 | `pickup` | Take the pickup order item by item, asking about allergies. |
 | `delivery` | Check the delivery ZIP, minimum, and fee, then take the order. |
-| `review` | Read back each item, the total, and the timing, then offer to text the summary. |
+| `review` | Read back each item and the total as an unsubmitted summary, then offer to text it. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
 Every stage can route to `end` as soon as the caller says goodbye or asks to
@@ -45,7 +45,9 @@ the facts in every stage, the agent would invent details.
 | `review` | `mock_tool_call_twilio_send_message` |
 
 The other stages have no tools. The text is sent at most once, only after the
-caller says yes to the separate "texted to that number?" question.
+caller says yes to the separate "May I text this unsubmitted order summary to
+that number?" question. The text begins "Unsubmitted order summary; not sent to
+the kitchen." and gives no ready-by time.
 
 ## Sample data
 
@@ -76,12 +78,14 @@ for each system.
 ## Try these turns
 
 - "Pickup. One 16-inch pepperoni and a fresh lemonade." Expect an allergy
-  question and a total of $22.50, ready in about 20 minutes.
-- Give your name and "+1 425 555 0123", confirm the order, then say "yes" to
-  the text offer. Expect one `mock_tool_call_twilio_send_message` call and the
-  text reported as sent.
+  question and a total of $22.50, read back as an unsubmitted order summary
+  that has not been sent to the kitchen.
+- Confirm the summary, ask for a text, give your name and "+1 425 555 0123",
+  then say "yes" to the text question. Expect one
+  `mock_tool_call_twilio_send_message` call and the text reported as sent, with
+  a reminder that sending it does not place the order.
 - Repeat with "+1 500 555 0001". Expect the text reported as not sent with the
-  reason from the error, then the total and estimated time read back once.
+  reason from the error, then an offer to read the summary back.
 - "Delivery to 1 Main Street, 98052. Pad Thai, medium, and spring rolls." Expect
   $20.45 plus the $4.99 fee.
 - "Delivery to ZIP 98101." Expect outside the zone and a pickup offer.
@@ -89,7 +93,7 @@ for each system.
 ## Boundaries
 
 - The restaurant, menu, and SMS results are fictional and come from the mock
-  server; no order is submitted and no text is delivered.
+  server; no order is submitted or accepted and no text is delivered.
 - `store` is `false`; enable persistence deliberately if you need it.
 - To use a real SMS or ordering system, follow
   [Connect real tools](../../docs/05_connect_real_tools.md); conversational

@@ -15,6 +15,7 @@ from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 
 import demo_server
+from voice_policy import VoicePolicy
 import template_portal
 from template_portal import (
     McpProbeError,
@@ -41,7 +42,7 @@ ORIGINAL_TEMPLATES = [
     ("appointment-setter-example", "example6_appointment_setter", 7, 12),
     ("receptionist-messaging-example", "example7_receptionist_messaging", 6, 14),
 ]
-# ElevenLabs-converted examples bound to the shared mock-tool-call MCP server.
+# Reference-template examples bound to the shared mock-tool-call MCP server.
 CONVERTED_TEMPLATES = [
     ("appointment-scheduler-example", "example8_appointment_scheduler", 6, 11),
     ("assessment-quiz-agent-example", "example9_assessment_quiz_agent", 5, 8),
@@ -100,6 +101,7 @@ class TemplateCatalogTests(unittest.TestCase):
             "profile": "normal",
             "auto_truncate": True,
             "interrupt_response": True,
+            "prefix_padding_ms": 800,
             "silence_duration_ms": 400,
         }
 
@@ -175,6 +177,40 @@ class TemplateCatalogTests(unittest.TestCase):
                 self.assertEqual(authored["instructions"], definition["instructions"])
                 self.assertEqual(
                     authored["handoff"]["nodes"], definition["handoff"]["nodes"],
+                )
+
+    def test_customer_support_matches_reference_privacy_and_ticket_rules(self) -> None:
+        agent = json.loads(
+            (ROOT.parent / "samples" / "example5_customer_support" / "agent.json").read_text(encoding="utf-8")
+        )
+        nodes = {node["id"]: node["config"] for node in agent["definition"]["handoff"]["nodes"]}
+        self.assertIn("share its title and company", nodes["account_billing"]["instructions"])
+        self.assertIn("Never read back phone numbers", nodes["account_billing"]["instructions"])
+        self.assertIn("Never change an existing ticket", nodes["resolve_or_escalate"]["instructions"])
+        allowed = [
+            name
+            for tool in template_portal.iter_mcp_tools(nodes["resolve_or_escalate"])
+            for name in tool["allowed_tools"]
+        ]
+        self.assertIn("mock_tool_call_zendesk_create_ticket", allowed)
+        self.assertNotIn("mock_tool_call_zendesk_add_comment", allowed)
+
+    def test_mock_tool_examples_use_persona_voices(self) -> None:
+        male_personas = {"Theo", "Owen", "Hugo", "Luca", "Milo", "Arjun", "Noah"}
+        for template_id, folder, *_ in MOCK_TOOL_TEMPLATES:
+            with self.subTest(template_id=template_id):
+                definition = json.loads(
+                    (ROOT.parent / "samples" / folder / "agent.json").read_text(encoding="utf-8")
+                )["definition"]
+                persona = definition["instructions"].split("You are ", 1)[1].split(",", 1)[0]
+                expected = (
+                    "en-US-Brian:DragonHDOmniLatestNeural"
+                    if persona in male_personas
+                    else "en-US-Emma:DragonHDOmniLatestNeural"
+                )
+                self.assertEqual(
+                    {"type": "azure-standard", "name": expected},
+                    definition["audio"]["output"]["voice"],
                 )
 
     def test_tool_map_suggestion_and_per_system_rewrite(self) -> None:
@@ -611,6 +647,13 @@ class TemplateCatalogTests(unittest.TestCase):
 
 class TemplateRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self.voice_policy_patch = patch.object(
+            VoicePolicy, "resolve", side_effect=lambda cfg, body: {
+                "definition": body["definition"], "region": "westus2", "resolutions": [],
+            },
+        )
+        self.voice_policy_patch.start()
+        self.addCleanup(self.voice_policy_patch.stop)
         args = demo_server.parse_args([
             "--project-endpoint",
             ENDPOINT,

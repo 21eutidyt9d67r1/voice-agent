@@ -1,0 +1,38 @@
+{
+  "en-US": {
+    "Female": ["en-US-Emma:DragonHDOmniLatestNeural", "en-US-Ava:DragonHDLatestNeural", "en-US-EmmaNeural", "en-US-AvaNeural"],
+    "Male": ["en-US-Brian:DragonHDOmniLatestNeural", "en-US-Andrew:DragonHDLatestNeural", "en-US-BrianNeural", "en-US-AndrewNeural"]
+  },
+  "en-IN": {
+    "Female": ["en-IN-Diya:DragonHDLatestNeural", "en-IN-NeerjaNeural"],
+    "Male": ["en-IN-PrabhatNeural"]
+  },
+  "hi-IN": {
+    "Female": ["hi-IN-Diya:DragonLatestNeural", "hi-IN-SwaraNeural"],
+    "Male": ["hi-IN-MadhurNeural"]
+  },
+  "zh-CN": {
+    "Female": ["zh-CN-Xiaoqi:DragonLatestNeural", "zh-CN-XiaoxiaoNeural"],
+    "Male": ["zh-CN-Yunfan:DragonLatestNeural", "zh-CN-YunxiNeural"]
+  },
+  "en-GB": {
+    "Female": ["en-GB-SoniaNeural"],
+    "Male": ["en-GB-RyanNeural"]
+  },
+  "es-US": {
+    "Female": ["es-US-PalomaNeural"],
+    "Male": ["es-US-AlonsoNeural"]
+  },
+  "fr-FR": {
+    "Female": ["fr-FR-DeniseNeural"],
+    "Male": ["fr-FR-HenriNeural"]
+  },
+  "de-DE": {
+    "Female": ["de-DE-KatjaNeural"],
+    "Male": ["de-DE-ConradNeural"]
+  },
+  "ja-JP": {
+    "Female": ["ja-JP-NanamiNeural"],
+    "Male": ["ja-JP-KeitaNeural"]
+  }
+}

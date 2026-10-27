@@ -5,6 +5,32 @@ import {
   mockWebRtcPeer, mountStudio, resource, selectSessionAgent, selectTab, CONFIG,
 } from "./studio-fixtures.mjs";
 
+test("selects a language-aware session voice without modifying the stored agent", async ({ page }) => {
+  const api = await mountStudio(page, {
+    voiceLanguages: ["en-US", "hi-IN"],
+    azureVoices: [...CONFIG.azureVoices, "en-US-Emma:DragonHDOmniLatestNeural"],
+  });
+  await selectSessionAgent(page, "realtime-agent");
+  await page.getByText("Session settings", { exact: true }).click();
+  await expect(page.getByLabel("Voice override", { exact: true })
+    .locator("option[value='en-US-Emma:DragonHDOmniLatestNeural']")).toHaveCount(1);
+  await page.getByLabel("Automatic voice language").selectOption("hi-IN");
+  await page.getByRole("textbox", { name: "Project region Optional", exact: true }).fill("centralindia");
+  await page.getByRole("button", { name: "Connect & start session" }).click();
+  await expect.poll(() => api.sockets.length).toBe(1);
+  await expect(page.getByRole("status").filter({ hasText: "centralindia:" })).toContainText("hi-IN-SwaraNeural");
+  expect(api.voiceSelections.at(-1)).toMatchObject({ language: "hi-IN", mode: "automatic", region: "centralindia" });
+  expect(api.versions).toHaveLength(0);
+});
+
+test("blocks a session when voice availability cannot be verified", async ({ page }) => {
+  const api = await mountStudio(page, {}, "/demo/", { voiceError: "Cannot check regional voice availability." });
+  await selectSessionAgent(page, "realtime-agent");
+  await page.getByRole("button", { name: "Connect & start session" }).click();
+  await expect(page.getByRole("alert")).toContainText("Cannot check regional voice availability.");
+  expect(api.sockets).toHaveLength(0);
+});
+
 test("keeps auxiliary notice links behind Debug mode without hiding the notice or licenses", async ({ page }) => {
   await mountStudio(page, { notice: "Synthetic evaluation notice." });
   const notice = page.getByRole("status").filter({ hasText: "Synthetic evaluation notice." });

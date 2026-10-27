@@ -28,6 +28,8 @@ import {
   uniqueId,
   validateDefinition,
 } from "./handoff-core.mjs?v=20261017-llm-150";
+import { resolveVoiceSelection, voiceSelectionNotice } from "/static/demo/voice-selection.mjs";
+import { createToolConnectRequest } from "/static/demo/tool-connection.mjs";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -84,6 +86,8 @@ const state = {
   camera: { x: 70, y: 85, scale: 1 },
   format: "yaml",
   publishing: false,
+  voiceLanguage: "",
+  voiceRegion: "",
   templates: [],
   templateQuery: "",
   pipelineAvailability: null,
@@ -96,6 +100,8 @@ const state = {
   toolGroups: [],
   toolDrafts: {},
   toolConnections: {},
+  toolConnectionBusy: false,
+  toolConnectionEpoch: 0,
   editorSession: null,
   dragging: null,
   panning: null,
@@ -594,6 +600,7 @@ function setDefinition(
   } = {},
 ) {
   state.definition = ensureEditableDefinition(definition);
+  state.voiceLanguage = "";
   state.agentName = name;
   state.version = version;
   state.draft = draft;
@@ -1147,6 +1154,7 @@ function renderToolBanner() {
 function openToolConnections({ fromPicker = false } = {}) {
   if (!state.definition) return;
   state.toolDrafts = {};
+  state.toolConnectionEpoch += 1;
   state.toolSummaryOpen = false;
   // Opened from Connect real tools: closing returns to the template list.
   state.toolDialogFromPicker = fromPicker === true;
@@ -1160,6 +1168,7 @@ function openToolConnections({ fromPicker = false } = {}) {
 }
 
 function closeToolConnections({ returnToPicker = true } = {}) {
+  state.toolConnectionEpoch += 1;
   $("#tool-connections").hidden = true;
   const fromPicker = state.toolDialogFromPicker;
   state.toolDialogFromPicker = false;
@@ -1227,9 +1236,11 @@ function renderToolConnections() {
   $("#tool-connections-summary").textContent = groups.length ? toolConnectionsSummary(groups).text : "";
   $("#tool-connections-back").hidden = !summaryOpen;
   $("#tool-connections-done").textContent = summaryOpen ? "Confirm and try it now" : "Done";
+  $("#tool-connections-done").disabled = state.toolConnectionBusy;
 }
 
 function finishToolConnections() {
+  if (state.toolConnectionBusy) return;
   if (!state.toolSummaryOpen && (state.toolGroups || []).length) {
     state.toolSummaryOpen = true;
     renderToolConnections();
@@ -1303,7 +1314,7 @@ function toolGroupCard(group) {
       <div class="tool-group-row">
         <p class="tool-group-state good">Calls your real tool at <strong>${escapeHtml(serverHost(connected.server_url))}</strong></p>
         ${known
-          ? `<button type="button" data-tool-action="use-mock" data-group="${id}">Use mock tool calls</button>`
+          ? `<button type="button" data-tool-action="use-mock" data-group="${id}" ${state.toolConnectionBusy ? "disabled" : ""}>Use mock tool calls</button>`
           : ""}
       </div>
       ${known ? "" : `<p class="tool-group-hint">To switch back to mock tool calls, use Undo or load the template again.</p>`}`;
@@ -1331,11 +1342,12 @@ function toolGroupCard(group) {
     body = `
       <div class="tool-group-row">
         <input type="url" data-tool-url="${id}" value="${escapeHtml(draft.url)}"
+          ${state.toolConnectionBusy ? "disabled" : ""}
           placeholder="https://your-server.example.com/mcp" autocomplete="off" spellcheck="false" maxlength="2048"
           aria-label="${escapeHtml(group.label)} MCP server URL">
         <button type="button" class="tool-group-action" data-tool-action="connect" data-group="${id}"
-          ${draft.busy || empty ? "disabled" : ""}>${draft.busy ? "Connecting…" : "Connect real tool"}</button>
-        <button type="button" data-tool-action="use-mock" data-group="${id}" ${draft.busy || empty ? "disabled" : ""}>Use mock tool calls</button>
+          ${state.toolConnectionBusy || empty ? "disabled" : ""}>${draft.busy ? "Connecting…" : "Connect real tool"}</button>
+        <button type="button" data-tool-action="use-mock" data-group="${id}" ${state.toolConnectionBusy || empty ? "disabled" : ""}>Use mock tool calls</button>
       </div>
       ${draft.message
         ? `<p class="tool-group-state ${draft.error ? "bad" : "good"}">${escapeHtml(draft.message)}</p>`
@@ -1358,26 +1370,38 @@ function replaceWorkingDefinition(label, definition) {
   });
 }
 
+function toolConnectionScope() {
+  return { epoch: state.toolConnectionEpoch, definition: stableJson(state.definition) };
+}
+
+function assertToolConnectionScope(scope) {
+  if (scope.epoch !== state.toolConnectionEpoch || scope.definition !== stableJson(state.definition)) {
+    throw new Error("The working copy or dialog changed while connecting. Connect again to apply this choice.");
+  }
+}
+
 async function connectToolGroup(group, draft) {
   const url = draft.url.trim();
-  if (!draft.tools || draft.discoveredUrl !== url) {
-    const result = await toolRequest("/api/tools/discover", { group: group.id, server_url: url });
-    if (!result.ok) throw new Error(result.error || "The MCP server could not be reached.");
-    Object.assign(draft, {
-      url: result.server_url, discoveredUrl: url, tools: result.tools, mapping: { ...result.mapping },
-    });
-  }
+  const scope = toolConnectionScope();
   const missing = group.tools.filter((name) => !draft.mapping[name]);
-  if (missing.length) {
+  if (draft.tools && draft.discoveredUrl === url && missing.length) {
     Object.assign(draft, {
       message: `This server doesn't offer every ${group.label} action the template needs. Match the remaining tools below, then select Connect again.`,
       error: true,
     });
     return;
   }
-  const result = await toolRequest("/api/tools/connect", {
-    group: group.id, server_url: draft.url, tool_map: draft.mapping,
-  });
+  const result = await toolRequest("/api/tools/connect", createToolConnectRequest(group.id, draft));
+  assertToolConnectionScope(scope);
+  if (!result.connected) {
+    Object.assign(draft, {
+      url: result.server_url, discoveredUrl: result.server_url,
+      tools: result.tools, mapping: { ...result.mapping },
+      message: "Match the remaining tools below, then select Connect again.", error: true,
+    });
+    return;
+  }
+  draft.url = result.server_url;
   rememberToolUrl(group.id, draft.url);
   state.toolConnections[group.id] = { server_url: draft.url, tool_map: result.tool_map };
   delete state.toolDrafts[group.id];
@@ -1388,6 +1412,7 @@ async function connectToolGroup(group, draft) {
 async function handleToolAction(event) {
   const button = event.target.closest("[data-tool-action]");
   if (!button) return;
+  if (state.toolConnectionBusy) return;
   const groupId = button.dataset.group;
   const group = (state.toolGroups || []).find((item) => item.id === groupId);
   if (!group) return;
@@ -1401,23 +1426,31 @@ async function handleToolAction(event) {
     return;
   }
   if (action === "connect" && draft && !draft.busy) {
+    state.toolConnectionBusy = true;
     Object.assign(draft, { busy: true, message: "", error: false });
     renderToolConnections();
     try {
       await connectToolGroup(group, draft);
     } catch (error) {
       Object.assign(draft, { message: `Could not connect: ${error.message}`, error: true });
+      setMessage("Tool connection was not applied.", error.message);
     } finally {
+      state.toolConnectionBusy = false;
       draft.busy = false;
     }
     renderToolConnections();
     return;
   }
   if (action === "use-mock" && state.toolConnections[groupId]) {
+    const scope = toolConnectionScope();
+    let switchError = "";
+    state.toolConnectionBusy = true;
+    renderToolConnections();
     try {
       const result = await toolRequest("/api/tools/disconnect", {
         group: groupId, tool_map: state.toolConnections[groupId].tool_map,
       });
+      assertToolConnectionScope(scope);
       delete state.toolConnections[groupId];
       state.toolDrafts[groupId] = {
         url: "", tools: null, mapping: {}, message: "", error: false, busy: false,
@@ -1425,9 +1458,12 @@ async function handleToolAction(event) {
       replaceWorkingDefinition(`Moved ${group.label} tools back to mock tool calls`, result.definition);
       state.toolGroups = result.groups;
     } catch (error) {
-      $("#tool-connections-status").textContent = `Could not switch back: ${error.message}`;
+      switchError = `Could not switch back: ${error.message}`;
+    } finally {
+      state.toolConnectionBusy = false;
     }
     renderToolConnections();
+    if (switchError) $("#tool-connections-status").textContent = switchError;
   }
 }
 
@@ -2842,6 +2878,14 @@ function renderNodeComponentPanel() {
       ...component,
       locked: component.compatible === false,
     }));
+  if (kind === "voice" && selection.model !== "azure-realtime"
+      && ["realtime", "cascaded"].includes(currentPipeline.architecture)) {
+    for (const id of state.cfg?.azureVoices || []) {
+      if (!availableComponents.some((component) => component.id === id)) {
+        availableComponents.push({ id, label: id, type: "azure-standard", compatible: true });
+      }
+    }
+  }
   const components = availableComponents.some((component) => component.id === current)
     ? availableComponents
     : [currentPipeline[kind], ...availableComponents];
@@ -2868,7 +2912,7 @@ function renderNodeComponentPanel() {
         <h4>Recognition settings</h4>
         <label for="component-stt-language">Language</label>
         <select id="component-stt-language">
-          ${["en-US", "en-GB", "es-US", "fr-FR", "de-DE", "ja-JP", "zh-CN"]
+          ${(state.cfg?.voiceLanguages || ["en-US"])
             .map((language) => `<option value="${language}"${rootSttLanguage() === language ? " selected" : ""}>${language}</option>`).join("")}
         </select>
         <div class="detail-row"><span>Scope</span><strong>All graph nodes</strong></div>
@@ -2893,6 +2937,19 @@ function renderNodeComponentPanel() {
           <p>This panel is reserved for contract-backed tuning such as temperature, speed, style, and provider-specific options.</p>
         </div>
       </div>`;
+    if (kind === "voice" && state.selected.id === ENTRYPOINT_ID) {
+      advanced += `
+        <div class="component-advanced">
+          <label for="component-voice-language">Automatic voice language</label>
+          <select id="component-voice-language">
+            <option value="">Keep authored voice; fallback if unavailable</option>
+            ${(state.cfg?.voiceLanguages || []).map((language) => `<option value="${language}"${state.voiceLanguage === language ? " selected" : ""}>${language}</option>`).join("")}
+          </select>
+          <label for="component-voice-region">Project region (optional)</label>
+          <input id="component-voice-region" value="${escapeHtml(state.voiceRegion)}" placeholder="Auto-detect">
+          <p>Voice selection applies to this working copy. It does not translate prompts or greetings. Region is read from Foundry; enter its actual region if discovery is unavailable.</p>
+        </div>`;
+    }
   }
   $("#node-component-panel-body").innerHTML = `
     ${state.debugMode ? `<div class="component-estimate-disclaimer" role="note" aria-label="Latency and cost disclaimer">
@@ -2961,18 +3018,50 @@ function renderNodeComponentPanel() {
       } else if (kind === "model") {
         applyNodeModelSelection(value);
       } else {
+        if (state.selected.id === ENTRYPOINT_ID) state.voiceLanguage = "";
         const voice = voiceDefinitionValue(value);
         applyNodeFieldChange(kind, typeof voice === "string" ? voice : JSON.stringify(voice));
       }
       renderNodeEditor();
     });
   });
-  $("#component-stt-language")?.addEventListener("change", (event) => {
+  $("#component-stt-language")?.addEventListener("change", async (event) => {
     mutate("Updated Agent-level STT language", (definition) => setRootSttLanguage(definition, event.target.value));
+    state.voiceLanguage = event.target.value;
+    await applyLanguageVoice();
     renderNodeEditor();
+  });
+  $("#component-voice-language")?.addEventListener("change", async (event) => {
+    state.voiceLanguage = event.target.value;
+    await applyLanguageVoice();
+    renderNodeEditor();
+  });
+  $("#component-voice-region")?.addEventListener("change", (event) => {
+    state.voiceRegion = event.target.value.trim();
   });
   $("#node-editor").classList.add("component-panel-open");
   panel.hidden = false;
+}
+
+async function applyLanguageVoice() {
+  const source = stableJson(state.definition);
+  const language = state.voiceLanguage;
+  try {
+    const result = await resolveVoiceSelection(state.definition, {
+      language: state.voiceLanguage, region: state.voiceRegion,
+      mode: state.voiceLanguage ? "automatic" : "fallback",
+    });
+    if (source !== stableJson(state.definition) || language !== state.voiceLanguage) {
+      setMessage("The working copy changed while checking voices. Apply the voice selection again.");
+      return;
+    }
+    mutate("Applied language-aware voice selection", (definition) => {
+      Object.assign(definition, result.definition);
+    });
+    setMessage(voiceSelectionNotice(result));
+  } catch (error) {
+    setMessage("Voice selection failed; no voice was silently replaced.", error.message);
+  }
 }
 
 const DELETE_RUNTIME_VALUE = Symbol("delete-runtime-value");
@@ -4126,6 +4215,12 @@ async function publishDefinition() {
   render();
   let posted;
   try {
+    const selected = await resolveVoiceSelection(state.definition, {
+      language: state.voiceLanguage, region: state.voiceRegion,
+      mode: state.voiceLanguage ? "automatic" : "fallback",
+    });
+    state.definition = selected.definition;
+    setMessage(voiceSelectionNotice(selected));
     posted = await serviceRequest(
       serviceUrl(`/agents/${encodeURIComponent(name)}/versions`),
       {

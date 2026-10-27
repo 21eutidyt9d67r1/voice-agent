@@ -134,7 +134,7 @@ class FoundryFixture:
         return ws
 
 
-async def create_test_app():
+async def create_test_app() -> web.Application:
     fixture = FoundryFixture()
     upstream_app = web.Application()
     upstream_app.router.add_route("*", "/api/projects/sample-project/{tail:.*}", fixture.handle)
@@ -164,10 +164,32 @@ async def create_test_app():
         "--project-endpoint", ENDPOINT, "--no-record-sessions",
     ]))
     app[portal.DEFAULT_CONFIG_KEY]._credential = FixtureCredential()
+    voice_policy = app[portal.VOICE_POLICY_KEY]
+    voice_policy.discover_projects = lambda cfg, endpoint: [{"endpoint": endpoint, "region": "centralindia"}]
+    voice_policy.catalog = lambda region: [
+        {"ShortName": name, "Locale": locale, "Gender": gender, "Status": "GA"}
+        for locale, genders in portal.VOICE_PRESETS.items()
+        for gender, names in genders.items()
+        for name in names
+        if "Dragon" not in name
+    ]
     mcp_files = tempfile.TemporaryDirectory(prefix="voice-portal-browser-mcp-")
     token_file = Path(mcp_files.name) / "token"
     token_file.write_text("synthetic-browser-mcp-token\n", encoding="utf-8")
     catalog = app[template_portal.CATALOG_KEY]
+    catalog_names = set()
+    for card in catalog.cards():
+        document = catalog.document(card["id"])
+        if document is None:
+            continue
+        for tool in template_portal.iter_mcp_tools(document["definition"]):
+            catalog_names.update(tool.get("allowed_tools") or [])
+    catalog_names.update(name.removeprefix("mock_tool_call_") for name in list(catalog_names))
+    handshake_patch = patch.object(template_portal, "mcp_handshake", return_value={
+        "reached": True, "http_status": 200, "server_name": "fixture-mcp", "server_version": "1",
+        "latency_ms": 1, "initialize_ms": 1, "tools_ms": 0, "tools": sorted(catalog_names),
+    })
+    handshake_patch.start()
     original_source = catalog.source
 
     def template_source(template_id, version="."):
@@ -188,6 +210,7 @@ async def create_test_app():
     source_patch.start()
 
     async def cleanup(_app):
+        handshake_patch.stop()
         source_patch.stop()
         for item in patches:
             item.stop()

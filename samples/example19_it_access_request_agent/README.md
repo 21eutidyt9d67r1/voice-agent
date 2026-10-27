@@ -92,7 +92,8 @@ for each system.
 - "Yes, file it." Expect `mock_tool_call_zendesk_create_ticket` once and a
   four-digit ticket number, with no claim that access was granted.
 - "I need write access to a GitHub repository." Expect a question for your
-  manager's email and the manager named as approver in the read-back.
+  manager's email; give `meganb@contoso.com`. Expect it spelled back and the
+  manager named as approver in the read-back.
 - "I need read access to the production database." Expect restricted, the
   justification questions, and three to five business days.
 - Give an unknown email such as `dana.test20261020@example.com`. Expect that you

@@ -89,7 +89,8 @@ for each system.
   through one step at a time, with a check after each step.
 - "What's our dress code for client visits?" Expect no matching article, no
   guess, and an offer to log the question for the docs team.
-- Give your name and email and agree to the read-back. Expect
+- Give "Dana Test, dana.test20261020@example.com" and agree to the read-back.
+  Expect
   `mock_tool_call_zendesk_create_ticket` once and a reference number (1001 or
   higher). Say "No, don't log it" instead and nothing is logged.
 - "Thanks, that's all." Expect a short goodbye and the session ending.

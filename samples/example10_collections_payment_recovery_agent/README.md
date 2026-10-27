@@ -29,7 +29,7 @@ lookup and an optional text.
 | `verify` | Confirm the account holder with the sample verification details without reading them aloud. |
 | `discuss` | Give the debt-collection disclosure, the balance, and the days past due, and ask whether the holder can pay. |
 | `pay` | Capture the arrangement and read it back; after a yes, find the contact record, then text a confirmation if the holder agrees. |
-| `hardship` | Explain the hardship program and capture a commitment noted for the billing team to approve. |
+| `hardship` | Explain the hardship program and capture a commitment collected for manual follow-up by the billing team. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
 Every stage can route to `end` as soon as the caller says goodbye or asks to
@@ -90,7 +90,8 @@ for each system.
 - "Yes, text me." Expect `mock_tool_call_twilio_send_message` once and the
   text reported as sent. Say "No thanks" instead and no text tool runs.
 - "I lost my job last month and can't pay right now." Expect the hardship
-  options and a commitment noted for the billing team, never "approved".
+  options and a commitment read back as collected for manual follow-up by the
+  billing team, never "approved", "set up", or "saved to the file".
 - "No, this is his roommate." Expect no mention of the account or the debt.
 
 ## Boundaries

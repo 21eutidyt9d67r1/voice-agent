@@ -1722,6 +1722,6 @@ export function useVoiceSession() {
     avatarActive, avatarStatus, avatarStream,
     webrtcActive, webrtcStatus, webrtcStream,
     setVerbose, connect, stopSession, toggleMute, sendText, clearMessages, sendMcpApprovalResponse, logApi,
-    logError, setClientFunctions,
+    logError, logStatus, setClientFunctions,
   };
 }

@@ -2,7 +2,7 @@
 
 ## Conclusion
 
-The ElevenLabs-converted Templates (Examples 5 to 34) call **mock tools** by
+The reference workflow Templates (Examples 5 to 34) call **mock tools** by
 default: the `mock-tool-call` MCP server on the shared no-auth MCP service. The
 mocks take the same arguments and return the same fields as real Salesforce,
 Zendesk, Twilio, and Microsoft 365 tools, but they use fictional data and never
@@ -68,6 +68,10 @@ Requirements in the hosted Playground:
   sandbox org, a trial tenant, or test data.
 - The server must speak MCP Streamable HTTP (`initialize`, `tools/list`,
   `tools/call`). Discovery has a short timeout.
+
+**Connection behavior:** the first **Connect real tool** request discovers the server's tools, matches their names, and applies a complete mapping in one backend request and one fresh MCP handshake. There is no separate discovery round trip on this path. If names need manual mapping, the system remains on mock tools; choosing the mappings and selecting Connect again rechecks the server's current tool list before applying them. The legacy discovery endpoint remains available. No tool-list cache or automatic background probe is introduced.
+
+Connection changes are applied one at a time so one system's response cannot overwrite another system's working copy. **Done** is disabled while a connection change is pending. Closing the dialog or changing the working copy invalidates a late connection response instead of applying it to a different template. This reduces redundant requests, not server cold starts or network latency.
 
 ## 2. Match the tool contract
 

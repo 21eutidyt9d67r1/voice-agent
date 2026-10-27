@@ -7,6 +7,7 @@ import asyncio
 import copy
 import ipaddress
 import json
+import logging
 import re
 import socket
 import sys
@@ -21,6 +22,8 @@ import requests
 from aiohttp import web
 from azure.ai.projects import AIProjectClient
 from dotenv import dotenv_values
+
+from voice_policy import VOICE_POLICY_KEY
 
 try:
     from .common import AgentsConfig, FOUNDRY_FEATURES
@@ -38,6 +41,8 @@ SHARED_MCP_DIR = VOICE_AGENT_ROOT / "shared_mcp"
 DOCS_DIR = VOICE_AGENT_ROOT / "docs"
 sys.path.insert(0, str(SAMPLES_DIR))
 from voice_agent_definition import materialize_handoff_instruction_inheritance
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE_CONFIG = ROOT / "templates.config.json"
 ARM_TOKEN_SCOPE = "https://management.azure.com/.default"
@@ -1132,7 +1137,12 @@ def discover_projects(
         "resources "
         "| where type =~ 'microsoft.cognitiveservices/accounts/projects' "
         "| extend proj=tostring(split(name, '/')[-1]), acct=tostring(split(name, '/')[0]) "
-        "| project proj, acct, resourceGroup, subscriptionId"
+        "| project proj, acct, resourceGroup, subscriptionId "
+        "| join kind=leftouter (resources "
+        "| where type =~ 'microsoft.cognitiveservices/accounts' "
+        "| project acct=name, subscriptionId, resourceGroup, location) "
+        "on acct, subscriptionId, resourceGroup "
+        "| project proj, acct, resourceGroup, subscriptionId, location"
     )
     rows = []
     for index in range(0, len(subscription_ids), 1000):
@@ -1156,6 +1166,7 @@ def discover_projects(
             ),
             "subscription_id": str(row.get("subscriptionId") or ""),
             "resource_group": str(row.get("resourceGroup") or ""),
+            "region": str(row.get("location") or ""),
         }
         for row in rows
         if row.get("proj") and row.get("acct")
@@ -1758,6 +1769,36 @@ async def custom_server_tools(server_url: str) -> tuple[str, list[str]]:
     return url, list(result["tools"])
 
 
+@dataclass(frozen=True)
+class _SystemToolDiscovery:
+    """Request-scoped discovery, shared by legacy discovery and one-step connection."""
+
+    group: str
+    server_url: str
+    tools: list[str]
+    required: list[str]
+    mapping: dict[str, str]
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "group": self.group,
+            "server_url": self.server_url,
+            "tools": self.tools,
+            "required": self.required,
+            "mapping": self.mapping,
+            "unmapped": [name for name in self.required if not self.mapping[name]],
+        }
+
+
+async def _discover_system_tools(group: dict[str, Any], server_url: str) -> _SystemToolDiscovery:
+    logger.info("Discovering MCP tools for system=%s", group["id"])
+    url, tools = await custom_server_tools(server_url)
+    mapping = suggest_tool_map(group["tools"], tools)
+    logger.info("Discovered MCP tools for system=%s count=%s", group["id"], len(tools))
+    return _SystemToolDiscovery(group["id"], url, tools, group["tools"], mapping)
+
+
 def catalog_mock_url(catalog: TemplateCatalog) -> str:
     """The mock-tool-call server URL that the catalog's mock-tool Templates use."""
     for card in catalog.cards():
@@ -1794,36 +1835,68 @@ async def list_definition_tool_groups(request: web.Request) -> web.Response:
 
 
 async def discover_definition_tools(request: web.Request) -> web.Response:
+    """Keep the legacy discovery-only API without applying a connection.
+
+    Parameters
+    ----------
+    request : web.Request
+        Working definition, system id, and MCP URL.
+
+    Returns
+    -------
+    web.Response
+        The existing discovery payload or an explicit discovery error.
+    """
     body, _, group = await _tool_request(request)
     if not group["connectable"] or not group["tools"]:
+        logger.error("MCP discovery is unavailable for system=%s", group["id"])
         return web.json_response({"ok": False, "error": f"{group['label']} cannot be connected here."})
     try:
-        url, tools = await custom_server_tools(str(body.get("server_url") or ""))
+        discovery = await _discover_system_tools(group, str(body.get("server_url") or ""))
     except ValueError as error:
+        logger.error("MCP discovery failed for system=%s error=%s", group["id"], type(error).__name__)
         return web.json_response({"ok": False, "error": str(error)})
-    mapping = suggest_tool_map(group["tools"], tools)
-    return web.json_response({
-        "ok": True,
-        "group": group["id"],
-        "server_url": url,
-        "tools": tools,
-        "required": group["tools"],
-        "mapping": mapping,
-        "unmapped": [name for name in group["tools"] if not mapping[name]],
-    })
+    return web.json_response(discovery._payload())
 
 
 async def connect_definition_tools(request: web.Request) -> web.Response:
+    """Discover and connect one system using exactly one fresh MCP handshake.
+
+    Parameters
+    ----------
+    request : web.Request
+        Working definition, system, URL, and optional explicit tool mapping.
+
+    Returns
+    -------
+    web.Response
+        Connected definition, or discovery with connected=false when mapping is needed.
+
+    Raises
+    ------
+    web.HTTPBadRequest
+        If the system, server, or explicit mapping is invalid.
+    """
     body, definition, group = await _tool_request(request)
     if not group["connectable"] or not group["tools"]:
+        logger.error("MCP connection is unavailable for system=%s", group["id"])
         raise web.HTTPBadRequest(text=f"{group['label']} cannot be connected here.")
     try:
-        url, tools = await custom_server_tools(str(body.get("server_url") or ""))
-        tool_map = validate_tool_map(group["tools"], tools, body.get("tool_map"))
+        discovery = await _discover_system_tools(group, str(body.get("server_url") or ""))
+        payload = discovery._payload()
+        if "tool_map" not in body and payload["unmapped"]:
+            logger.info("MCP connection requires manual mapping for system=%s", group["id"])
+            return web.json_response({**payload, "connected": False})
+        proposed = body["tool_map"] if "tool_map" in body else discovery.mapping
+        tool_map = validate_tool_map(group["tools"], discovery.tools, proposed)
     except ValueError as error:
+        logger.error("MCP connection failed for system=%s error=%s", group["id"], type(error).__name__)
         raise web.HTTPBadRequest(text=str(error)) from error
-    updated = apply_tool_servers(definition, {group["id"]: (url, tool_map)})
+    updated = apply_tool_servers(definition, {group["id"]: (discovery.server_url, tool_map)})
+    logger.info("Connected MCP tools for system=%s", group["id"])
     return web.json_response({
+        **payload,
+        "connected": True,
         "definition": updated,
         "tool_map": tool_map,
         "groups": definition_tool_groups(updated),
@@ -1876,6 +1949,15 @@ async def publish_template(request: web.Request) -> web.Response:
             mcp_connection_id=connection_name,
             mcp_public=source.connection_mode == "public",
         )
+        voice_selection = await asyncio.to_thread(
+            request.app[VOICE_POLICY_KEY].resolve, cfg, {
+                "definition": definition,
+                "mode": "automatic" if body.get("language") else "fallback",
+                "language": str(body.get("language") or ""),
+                "region": str(body.get("region") or ""),
+            },
+        )
+        definition = voice_selection["definition"]
         result = await asyncio.to_thread(
             publish_agent,
             cfg,
@@ -1898,6 +1980,7 @@ async def publish_template(request: web.Request) -> web.Response:
         "source_agent_name": str(document.get("name") or template_id),
         "source_template_version": version,
         "mcp_connection_name": connection_name,
+        "voice_selection": {key: value for key, value in voice_selection.items() if key != "definition"},
     }, status=201)
 
 

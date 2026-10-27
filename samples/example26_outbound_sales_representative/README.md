@@ -26,7 +26,7 @@ requests, and a confirmed demo booking with a CRM follow-up.
 | `opener` | Ask permission for 30 seconds. |
 | `pitch` | Give one value proposition and one qualifying question, then listen. |
 | `close` | Wrap up warmly whatever the outcome; mention the invite only when it was created. |
-| `book` | Offer returned demo slots, read the invite back, create it after a yes, then look up or create the lead. |
+| `book` | Offer returned demo slots, read the invite back, and create it after a yes; then offer an optional CRM save and, only after a separate yes, look up or create the lead. |
 | `handle_objection` | Acknowledge the objection, answer with one concrete point, and check it resolved the concern. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
@@ -45,7 +45,9 @@ the facts in every stage, the agent would invent details.
 
 The other stages have no tools. `mock_tool_call_create_event` and
 `mock_tool_call_salesforce_create_lead` run at most once each, and the invite is
-created only after the lead says yes to the read-back.
+created only after the lead says yes to the read-back. The CRM tools run only
+after a separate yes to saving the details read back; consent to the invite is
+not consent to the CRM save.
 
 ## Sample data
 
@@ -85,9 +87,12 @@ Playground because they act as the signed-in user.
   Expect the date, time, time zone, and email read back and a question whether
   to send the invite; nothing is created yet.
 - "Yes, send it." Expect `mock_tool_call_create_event` once and the invite
-  reported as sent, then a Salesforce search that finds nothing and one
+  reported as sent, then an offer to save your details as a CRM lead with the
+  data read back; no CRM tool runs yet.
+- "Yes, save it." Expect a Salesforce search that finds nothing and one
   `mock_tool_call_salesforce_create_lead` call. Use `jrogers@burlington.com`
-  instead and no lead is created because the contact exists.
+  instead and no lead is created because the contact exists. Say "No" instead
+  and no CRM tool runs; your details are not kept for follow-up.
 - "We already built our own pipelines and we're too busy." Expect one concrete
   point from the sample facts.
 - "Take me off your list." Expect the request noted for the team, without a

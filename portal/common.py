@@ -17,6 +17,8 @@ from urllib.parse import quote, urlsplit
 
 from azure.identity import AzureCliCredential, DefaultAzureCredential
 
+from voice_policy import VOICE_PRESETS
+
 TOKEN_SCOPE = "https://ai.azure.com/.default"
 FOUNDRY_FEATURES = "VoiceAgents=V1Preview"
 INPUT_TRANSCRIPTION_MODEL = "azure-speech"
@@ -49,6 +51,10 @@ AZURE_VOICES = [
     "en-US-AvaMultilingualNeural",
     "zh-CN-XiaoxiaoNeural",
 ]
+AZURE_VOICES = list(dict.fromkeys([
+    *AZURE_VOICES,
+    *(voice for genders in VOICE_PRESETS.values() for names in genders.values() for voice in names),
+]))
 DEFAULT_AZURE_VOICE = AZURE_VOICES[0]
 
 

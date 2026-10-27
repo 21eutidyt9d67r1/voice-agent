@@ -84,7 +84,8 @@ Playground because they act as the signed-in user.
   `mock_tool_call_send_email_with_attachments` call and the note reported as
   emailed. Say "no" instead and nothing is sent.
 - "I need someone in Legal to review a contract." Expect Legal as the team,
-  questions for your name and callback number, and a read-back. After "yes",
+  questions for your name and callback number (give "Dana Test" and
+  "+1 425 555 0123"), and a read-back. After "yes",
   expect one `mock_tool_call_zendesk_create_ticket` call and a four-digit request
   number, with no promised response time.
 

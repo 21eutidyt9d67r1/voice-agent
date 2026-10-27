@@ -94,7 +94,7 @@ so they cannot be connected in the shared Playground and stay on mock data
 there; use a Work IQ Toolbox in your own Foundry Project instead.
 
 The example uses `gpt-realtime` with `azure_semantic_vad`, `profile: normal`,
-and `silence_duration_ms: 400`.
+`prefix_padding_ms: 800`, and `silence_duration_ms: 400`.
 
 ## Try these turns
 
@@ -102,15 +102,19 @@ and `silence_duration_ms: 400`.
   visitor parking at the main entrance, with no tool call.
 - "Can I talk to Alex Wilber?" Expect no transfer claim, a
   `mock_tool_call_get_user_presence` call, and "available". Agree to a text and
-  give your name, a callback number with country code, and a reason: expect the
+  give your name, a callback number with country code such as
+  "+1 425 555 0123", and a reason: expect the
   number read back, then one `mock_tool_call_twilio_send_message` call to Alex's
   mobile and the text reported as sent.
 - "Is Megan Bowen free?" Expect presence reported as in a meeting and an offer
   to text her or take a message.
 - "Leave a message for Megan about my onboarding." Expect missing details asked
-  one at a time and the message read back. Say "no, don't send it": expect no
+  one at a time (give "Dana Test" and the callback number "+1 425 555 0123")
+  and the message read back. Say "no, don't send it": expect no
   email. After a later "yes", expect one
   `mock_tool_call_send_email_with_attachments` call to `meganb@contoso.com`.
+  If the send fails, expect it reported as not sent and an offer to read the
+  unsent message back, with no retry.
 - "Put me through to Isaiah Langer." Expect no directory match and an offer of
   the closest department.
 

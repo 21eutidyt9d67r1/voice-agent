@@ -29,7 +29,7 @@ tools.
 | --- | --- |
 | `greeting` | Welcome the visitor and ask what brought them here. |
 | `collect` | Collect name, email, company, role, the problem, timeline, and any budget signal. |
-| `hot` | Offer returned slots, book the sales call after a yes, then create a lead when no contact exists. |
+| `hot` | Offer returned slots and book the sales call after a yes; then offer an optional CRM save and, only after a separate yes, create a lead when no contact exists. |
 | `nurture` | Capture the resource they want and a follow-up preference, and create a lead after a yes. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
@@ -48,8 +48,9 @@ the facts in every stage, the agent would invent details.
 | `nurture` | `mock_tool_call_salesforce_search`, `mock_tool_call_salesforce_create_lead` |
 
 The other stages have no tools. Each write runs once, only after the visitor
-says yes to the read-back. When the email matches an existing contact, no lead
-is created.
+says yes to the read-back. In `hot`, consent to the invite is not consent to
+the CRM save: the agent reads back what would be stored and asks separately.
+When the email matches an existing contact, no lead is created.
 
 ## Sample data
 
@@ -88,9 +89,15 @@ Playground because they act as the signed-in user.
   `mock_tool_call_find_meeting_times` and two or three returned slots.
 - Pick a slot and give `dana.test20261020@example.com`. Expect the date, time,
   time zone, and email read back. After "yes", expect
-  `mock_tool_call_create_event`, then `mock_tool_call_salesforce_search` and
-  `mock_tool_call_salesforce_create_lead`, each once.
-- "Just browsing; send me the pricing overview." Expect your details read back,
+  `mock_tool_call_create_event` once and the invite result, then an offer to
+  save your details as a CRM lead with the data read back; no CRM tool runs
+  yet.
+- "Yes, save it." Expect `mock_tool_call_salesforce_search` and
+  `mock_tool_call_salesforce_create_lead`, each once, and the lead reported as
+  saved. Say "No" instead: expect no CRM call and that your details will not be
+  kept for follow-up; the booking stands.
+- "Just browsing; send me the pricing overview. Dana Test, Fabrikam,
+  dana.test20261020@example.com." Expect your details read back,
   and after "yes" a lead and "the team will follow up", never "sent".
 - Use `rose@edge.com` in the nurture path. Expect the contact found and no new
   lead.

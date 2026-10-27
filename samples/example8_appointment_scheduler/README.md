@@ -84,7 +84,8 @@ Playground because they act as the signed-in user.
 ## Try these turns
 
 - "I'd like to book an initial consultation, Thursday afternoon, Pacific time."
-  Expect name and email questions, then two or three slots returned by
+  Expect name and email questions; answer "Dana Test,
+  dana.test20261020@example.com". Then expect two or three slots returned by
   `mock_tool_call_find_meeting_times`.
 - Pick a slot. Expect the service, date, time, timezone, email, and the
   medication-list prep read back with a question whether to book it; nothing is
@@ -92,10 +93,13 @@ Playground because they act as the signed-in user.
 - "Yes, book it." Expect `mock_tool_call_create_event` once, then the booked
   time and the invite with the Teams link reported as sent.
 - "This is Dana Test. I need to move my follow-up visit next Thursday, Pacific
-  time." Expect `mock_tool_call_list_calendar_view` to find the 10:00 AM visit,
+  time." When asked for the confirmation email, give
+  `dana.test20261020@example.com`. Expect `mock_tool_call_list_calendar_view`
+  to find the 10:00 AM visit,
   new slots, the old and new time read back, and after "Yes"
   `mock_tool_call_update_event`.
-- "This is Jordan Lee, please cancel my consultation next Friday." Expect the
+- "This is Jordan Lee, please cancel my consultation next Friday." When asked
+  for the confirmation email, give `jordan.lee@example.com`. Expect the
   2:00 PM event read back, no new times offered, and after "Yes"
   `mock_tool_call_cancel_event`. Say "No, keep it" instead and nothing changes.
 

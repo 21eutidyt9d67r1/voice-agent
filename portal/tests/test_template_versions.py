@@ -283,6 +283,9 @@ class TemplateVersionRouteTests(TemplateVersionFixture, unittest.IsolatedAsyncio
 
     async def test_publish_and_mcp_configuration_use_selected_version(self) -> None:
         with (
+            patch.object(demo_server.VoicePolicy, "resolve", side_effect=lambda cfg, body: {
+                "definition": body["definition"], "region": "westus2", "resolutions": [],
+            }),
             patch.object(template_portal, "validate_mcp_probe_url"),
             patch.object(template_portal, "create_mcp_connection") as connection,
             patch.object(template_portal, "publish_agent", return_value={

@@ -237,7 +237,7 @@ publish operations, including the template catalog consumed by Handoff Graph.
   `example3_elevator_service_with_safety_zendesk_and_handoff`. The
   `example5_customer_support`, `example6_appointment_setter`, and
   `example7_receptionist_messaging` handoff examples, and the 27
-  ElevenLabs-converted `example8_*` through `example34_*` handoff examples,
+  reference-template `example8_*` through `example34_*` handoff examples,
   call mock tools on the public `/mcp/mock-tool-call` route by default and
   need no MCP setup. Each card has a **Version** selector: **Default** loads
   the configured Agent file;
@@ -259,6 +259,13 @@ publish operations, including the template catalog consumed by Handoff Graph.
   Pre-runtime-update source bytes and manifests are retained separately and
   are not selectable versions. These parameter changes are not a new live
   latency, interruption or listening acceptance.
+- Examples 5–34 have independently named personas and greetings. Their default en-US output uses `en-US-Emma:DragonHDOmniLatestNeural` or `en-US-Brian:DragonHDOmniLatestNeural`. Voice names are speaker identities, not the names the agents introduce themselves with.
+- **Automatic voice language** is available in the Editor's starter-node Voice panel and Runtime's Session settings. Changing the Editor's STT language also selects a matching voice. Session settings change only the connection, never the published Agent. This selects the voice before the session, not per-utterance switching; it does not translate prompts or greetings.
+- The priorities in `static/voice-presets.json` cover en-US, en-IN, hi-IN, zh-CN, en-GB, es-US, fr-FR, de-DE, and ja-JP. Preferred Hindi output uses Diya Dragon, with Swara Neural as a regional fallback; Chinese uses Xiaoqi/Yunfan Dragon, with Xiaoxiao/Yunxi Neural fallbacks. Male voice preferences use male variants when available. Other explicitly requested locales can use voices listed for that locale in the regional catalog.
+- Before UI publication or connection, the Portal checks the selected project's region and the public catalog at `https://<region>.tts.speech.microsoft.com/synthesize/list/cognitive-service/voices?showHidden=true`. Region discovery uses existing Foundry project discovery and requires management-plane read access; if unavailable, enter the project's actual region in Session settings or the Editor Voice panel. Successful lookups are cached for ten minutes. Catalog names are matched case-insensitively because preview entries can differ in casing.
+- Unavailable Azure standard voices are replaced only with catalog-listed voices that support the selected locale, including explicitly listed multilingual support. The UI reports every replacement. A failed/empty catalog or a locale with no available voice blocks the operation; it never silently substitutes English. This is an availability check, not a guarantee against service outages, quota limits, or deployment-specific restrictions. Explicit native/custom voices are not automatically replaced; Azure Realtime native models cannot use automatic Azure standard selection.
+- Editor publication resolves explicit handoff-node voices as well as the root. Runtime cannot change stored node voices through a root session override: if a node needs fallback, publish the corrected working copy from Editor first. Direct REST forwarding and standalone WebRTC clients retain their service-native behavior.
+
 - Template MCP readiness calls `initialize` and `tools/list` against the hosted
   endpoint without an Authorization header and checks every declared tool.
   Publishing sets that endpoint on every MCP tool, including handoff nodes,
@@ -424,6 +431,18 @@ same checked-in bundles.
 
 Use `npm run watch` / `npm run watch:webrtc` while editing. Rebuild **both**
 bundles before committing.
+
+### Voice-selection contributor checks
+
+`POST /api/voices/resolve` is a Portal-local helper, **not** the proposed Vienna template/tool-binding API. It accepts `definition`, optional `language`, `region`, `voice`, and `mode` (`fallback` or `automatic`), and returns a copied `definition`, resolved `region`, and per-field `resolutions`. No credentials or caller content are included in catalog requests or selection logs.
+
+Install the optional pytest developer tool with `python -m pip install pytest`, then run mocked checks with `python -m pytest tests/unit tests/test_templates.py tests/test_portal.py`. Opt-in live tests use `VOICE_POLICY_LIVE_TESTS=1`, `AZURE_VOICE_AGENTS_ENDPOINT`, and `VOICE_POLICY_EXPECTED_REGION`; run `python -m pytest tests/end_to_end/test_voice_policy_live.py`. They query real catalogs, read the project region, and create short-lived test agents with conversation storage disabled. Audio-only tests have no tools; the Customer Support conversation only reads fictional CRM data from the stateless mock. Test agents are deleted afterward.
+
+The tests check fresh, unique persona names, consistency between root/node instructions and greetings, and actual email read-back/confirmation before Customer Support CRM lookup. Prompt checks do not replace conversational evaluation: identity/privacy and consent rules remain unchanged.
+
+Tool-connection regressions are in `tests/unit/test_tool_connections.py` and the Editor browser tests. The first `/api/tools/connect` request may omit `tool_map`: a complete name match connects immediately, while incomplete discovery returns `connected: false` and mapping choices without changing the definition. An explicitly supplied map is always checked against a fresh server listing; an invalid map is never silently replaced with an automatic suggestion. `/api/tools/discover` remains backward compatible.
+
+For the real handshake check, set `TOOL_CONNECT_LIVE_TESTS=1` and `VOICE_TOOL_TEST_URL` locally, then run `python -m pytest tests/end_to_end/test_tool_connect_live.py`. This test wraps the real handshake to assert exactly one call; it does not mock the external server, call business tools, or publish an Agent. Treat URLs containing access tokens as credentials and do not check them into source.
 
 ## Safety and troubleshooting
 

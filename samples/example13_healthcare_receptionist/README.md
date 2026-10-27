@@ -84,7 +84,8 @@ Playground because they act as the signed-in user.
 ## Try these turns
 
 - "I'd like a checkup with Dr. Patel next Wednesday morning." Expect name,
-  date-of-birth, and contact questions, then
+  date-of-birth, and contact questions (for a new patient, give "Dana Test",
+  "+1 425 555 0123", and `dana.test20261020@example.com`), then
   `mock_tool_call_get_user_date_and_time_zone_settings` and
   `mock_tool_call_find_meeting_times`, and two or three slots between 8:00 AM
   and 4:30 PM Pacific.
@@ -93,7 +94,8 @@ Playground because they act as the signed-in user.
   After "Yes", expect `mock_tool_call_create_event` once and the booking
   reported.
 - "I need to cancel my appointment on Thursday at 10 AM." Expect the 24-hour
-  policy, a callback number question, and the request read back. After "Yes",
+  policy, a callback number question (give "+1 425 555 0123"), and the request
+  read back. After "Yes",
   expect `mock_tool_call_zendesk_create_ticket` once, a request number, and that
   the front desk confirms within one business day.
 - "I have chest pain right now." Expect a direction to call 911 and the nurse

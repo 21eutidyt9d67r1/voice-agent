@@ -29,7 +29,7 @@ saving.
 | `deep_dive` | Explore tools, workarounds, and ratings with an engaged participant. |
 | `priority_questions` | Ask only the three priority questions when time is short. |
 | `polite_close` | Thank a participant who is ready to stop. |
-| `submit_notes` | Recap the interview for the participant to correct, then save notes only with consent. |
+| `submit_notes` | Recap the interview for the participant to correct, then save notes only after a fresh yes to saving that recap. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
 Every stage can route to `end` as soon as the caller says goodbye or asks to
@@ -47,7 +47,9 @@ the facts in every stage, the agent would invent details.
 
 The other stages have no tools. The notes are saved once, with
 `consent_given` true, only when the participant agreed to a written recap at
-the start and confirmed the closing recap. The two 1 to 5 ratings are sent
+the start, has not withdrawn consent, and explicitly agreed in a later turn to
+saving the closing recap. A goodbye or no-contact request ends the call
+without a notes write. The two 1 to 5 ratings are sent
 when collected, and 0 otherwise.
 
 ## Sample data
@@ -76,14 +78,18 @@ for each system.
 
 - "Sure, I'm happy to help, and a written recap is fine." Then "I have 15
   minutes." Expect the deep dive and ratings with reasons.
-- Confirm the closing recap with "Yes, that's right." Expect one
-  `mock_tool_call_research_save_interview_notes` call and the notes reported as
-  saved.
+- At the close, expect a brief recap and a question whether it is accurate and
+  may be saved for the product team. Say "Yes, that's right, save it." Expect
+  one `mock_tool_call_research_save_interview_notes` call and the notes
+  reported as saved. Say "Don't save it" instead and no tool runs.
 - "I only have a few minutes." Expect only the three priority questions, then
   the recap.
-- Decline the written recap at the start. Expect the interview and closing
-  recap as usual, no tool call, and no claim that notes were saved.
-- "I'd rather stop here." Expect a thank-you, a recap, and the end.
+- Decline the written recap at the start. Expect the interview as usual, no
+  recap request at the close, no tool call, and no claim that notes were saved.
+- "I'd rather stop here." Expect a thank-you without another interview
+  question, then the optional recap.
+- "Goodbye, please don't contact me again." Expect the call to end without a
+  notes write.
 
 ## Boundaries
 

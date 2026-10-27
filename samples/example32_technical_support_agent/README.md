@@ -82,8 +82,9 @@ for each system.
 
 - "My sync keeps failing." Expect a `mock_tool_call_zendesk_search` call and
   one step at a time from "Troubleshoot data sync failures", naming the title.
-- "Still broken, escalate it, high urgency." Expect a read-back with no tool
-  call. After "yes", expect one `mock_tool_call_zendesk_create_ticket` call, a
+- "Still broken, escalate it, high urgency." When asked, give "Dana Test,
+  dana.test20261020@example.com". Expect a read-back with no tool call. After
+  "yes", expect one `mock_tool_call_zendesk_create_ticket` call, a
   four-digit ticket number, and a response within one business day.
 - "Please add to ticket 3 that it started after the key rotation." Expect the
   comment read back and, after "yes", one `mock_tool_call_zendesk_add_comment`

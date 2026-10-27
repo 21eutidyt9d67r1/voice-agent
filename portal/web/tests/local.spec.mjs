@@ -19,6 +19,66 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("Editor resolves a language voice with regional fallback in the local working copy", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/editor/");
+  await page.getByRole("button", { name: "Create blank", exact: true }).click();
+  await page.locator("#node-outline button").first().click();
+  await page.locator('[data-node-component="voice"]').click();
+  await expect(page.locator("#node-component-panel-body")).toContainText("en-US-Emma:DragonHDOmniLatestNeural");
+  await page.getByLabel("Automatic voice language", { exact: true }).selectOption("hi-IN");
+  await expect(page.locator("#node-editor-body")).toContainText("hi-IN-SwaraNeural");
+  await page.getByRole("button", { name: "Close component configuration" }).click();
+  await page.getByRole("button", { name: "Save node", exact: true }).click();
+  await page.locator("#export-action").click();
+  await expect(page.locator("#definition-output")).toContainText("hi-IN-SwaraNeural");
+  expect(errors).toEqual([]);
+});
+
+test("Connect real tool discovers and connects a system in one request", async ({ page }) => {
+  const requests = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/tools/discover" || path === "/api/tools/connect") requests.push(path);
+  });
+  await page.goto("/editor/");
+  await page.getByRole("button", { name: "Load from templates", exact: true }).click();
+  await page.locator('[data-template-id="customer-support-example"]').click();
+  await page.locator("#open-tool-connections").click();
+  const card = page.locator('[data-group-card="salesforce"]');
+  await card.getByLabel("Salesforce MCP server URL").fill("https://crm.example/mcp");
+  await card.getByRole("button", { name: "Connect real tool", exact: true }).click();
+  await expect(card).toContainText("Connected to real tool");
+  expect(requests).toEqual(["/api/tools/connect"]);
+  await expect(page.locator('[data-group-card="zendesk"]')).toContainText("Using mock tool calls");
+});
+
+test("closing during a tool connection does not apply its late response", async ({ page }) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let received = false;
+  await page.route("**/api/tools/connect", async (route) => {
+    received = true;
+    await gate;
+    const response = await route.fetch();
+    await route.fulfill({ response });
+  });
+  await page.goto("/editor/");
+  await page.getByRole("button", { name: "Load from templates", exact: true }).click();
+  await page.locator('[data-template-id="customer-support-example"]').click();
+  await page.locator("#open-tool-connections").click();
+  const card = page.locator('[data-group-card="salesforce"]');
+  await card.getByLabel("Salesforce MCP server URL").fill("https://crm.example/mcp");
+  await card.getByRole("button", { name: "Connect real tool", exact: true }).click();
+  await expect.poll(() => received).toBe(true);
+  await expect(page.locator("#tool-connections-done")).toBeDisabled();
+  await page.getByRole("button", { name: "Close tool connections", exact: true }).click();
+  release();
+  await expect(page.locator("#operation-status")).toContainText("Tool connection was not applied.");
+  await page.locator("#open-tool-connections").click();
+  await expect(card).toContainText("Using mock tool calls");
+});
 for (const width of [1440, 390]) {
   test(`Editor hides pipeline cost and latency by default at ${width}px`, async ({ page }) => {
     const errors = [];

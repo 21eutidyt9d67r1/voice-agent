@@ -87,7 +87,8 @@ Playground because they act as the signed-in user.
 
 - "I was rear-ended last month and hurt my back." Expect the conflict-check
   question, fact collection, and an intake summary read back with a question.
-- Give `dana.test20261020@example.com` and say "yes". Expect
+- Give "Dana Test", `dana.test20261020@example.com`, and "+1 425 555 0123",
+  and say "yes" to the read-back. Expect
   `mock_tool_call_salesforce_search`, then
   `mock_tool_call_salesforce_create_lead` once and "saved for attorney review".
   With `jordan.lee@example.com`, expect no lead and "noted for the attorney".

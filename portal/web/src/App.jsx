@@ -34,6 +34,7 @@ import { ReviewPanel } from "./components/ReviewPanel.jsx";
 import { ChatPanel } from "./components/ChatPanel.jsx";
 import { HandoffGraphPanel } from "./components/HandoffGraphPanel.jsx";
 import { SessionControls } from "./components/SessionControls.jsx";
+import { resolveVoiceSelection, sessionVoiceOverride, voiceSelectionNotice } from "../../static/voice-selection.mjs";
 import { StudioHeader } from "./components/StudioHeader.jsx";
 
 const WORKSPACE_MIN_SIDE_WIDTH = 360;
@@ -480,10 +481,16 @@ export function App() {
       session.logError(`Could not start Editor Agent '${requested}': it is not available in this Project.`);
       return;
     }
-    session.connect(
-      agent.name, "", "", cfg.apiVersion, transport, Boolean(agent.clientReferenceEc),
-    );
-  }, [cfg, agent, agentListState.loading, transport, transportError, session.connect, session.logError]);
+    let cancelled = false;
+    resolveVoiceSelection(agent.definition).then((result) => {
+      if (cancelled) return;
+      session.logStatus(voiceSelectionNotice(result));
+      return session.connect(
+        agent.name, sessionVoiceOverride(result), "", cfg.apiVersion, transport, Boolean(agent.clientReferenceEc),
+      );
+    }).catch((error) => { if (!cancelled) session.logError(error.message); });
+    return () => { cancelled = true; };
+  }, [cfg, agent, agentListState.loading, transport, transportError, session.connect, session.logError, session.logStatus]);
 
   const onCreateAgent = async ({
     name: requestedName, model, voice, tools, subagents, inferenceMode, store, avatar,
@@ -514,6 +521,9 @@ export function App() {
       greeting: buildGreetingConfig(greeting),
       inputTranscriptionModel,
     });
+    const voiceSelection = await resolveVoiceSelection(body.definition);
+    body.definition = voiceSelection.definition;
+    session.logStatus(voiceSelectionNotice(voiceSelection));
     const { path, body: requestBody } = buildVersionCreateRequest(cfg, body);
     session.logApi("POST", path);
     const resp = await fetch(path, {

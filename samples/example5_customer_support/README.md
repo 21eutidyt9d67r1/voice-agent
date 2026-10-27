@@ -8,8 +8,9 @@ support ticket as a staged handoff graph.
 
 By default its business tools run on the shared **mock-tool-call** MCP server:
 Zendesk help-center search for troubleshooting steps, Salesforce contact lookup
-to verify an account, and Zendesk tools to comment on an existing ticket or
-open a new one. The mocks take the same arguments and return the same fields as
+to verify an account, and a Zendesk tool to open a new ticket. The agent never
+changes an existing ticket: the caller is not verified, so a ticket number they
+give is named as related in the new ticket. The mocks take the same arguments and return the same fields as
 the real tools, but results are fictional and nothing real is filed. To connect
 real systems, see [Connect real tools](../../docs/05_connect_real_tools.md).
 
@@ -29,8 +30,8 @@ tools.
 | --- | --- |
 | `identify_issue` | Listen to the issue, capture the caller's name, and route to the technical or account path. |
 | `troubleshoot` | Search the help center, then suggest one step at a time and wait for the result. |
-| `account_billing` | Look the contact up by email, check the caller's full name against the record, then answer only from returned fields. |
-| `resolve_or_escalate` | Confirm a fix, or read the escalation back and, after a yes, comment on the caller's ticket or open a new one. |
+| `account_billing` | Look the contact up by email, check the caller's full name against the record, then share only the title and company; never contact details. |
+| `resolve_or_escalate` | Confirm a fix, or read the escalation back and, after a yes, open a new ticket (naming any existing ticket as related). |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
 Every stage can route to `end` as soon as the caller says goodbye or asks to
@@ -45,12 +46,13 @@ handoff node's instructions replace the session instructions.
 | --- | --- |
 | `troubleshoot` | `mock_tool_call_zendesk_search` |
 | `account_billing` | `mock_tool_call_salesforce_search`, `mock_tool_call_salesforce_get_contact` |
-| `resolve_or_escalate` | `mock_tool_call_salesforce_search`, `mock_tool_call_salesforce_get_contact`, `mock_tool_call_zendesk_search`, `mock_tool_call_zendesk_add_comment`, `mock_tool_call_zendesk_create_ticket` |
+| `resolve_or_escalate` | `mock_tool_call_salesforce_search`, `mock_tool_call_salesforce_get_contact`, `mock_tool_call_zendesk_search`, `mock_tool_call_zendesk_create_ticket` |
 
 `identify_issue` and `end` have no business tools. The escalation is written
-once, only after the caller says yes to the read-back: a comment when the caller
-gave a ticket number, otherwise a new ticket with a priority of low, normal,
-high, or urgent.
+once, only after the caller says yes to the read-back: a new ticket with a
+priority of low, normal, high, or urgent. When the caller gives an existing
+ticket number, the new ticket names it as related; nothing about the existing
+ticket is read back or changed.
 
 ## Sample data
 
@@ -82,7 +84,7 @@ system (Salesforce, Zendesk); the Agent calls it without credentials, so point
 it at sandbox data. There is nothing to start locally.
 
 The example uses `gpt-realtime` with `azure_semantic_vad`, `profile: normal`,
-and `silence_duration_ms: 400`.
+`prefix_padding_ms: 800`, and `silence_duration_ms: 400`.
 
 ## Try these turns
 
@@ -90,16 +92,21 @@ and `silence_duration_ms: 400`.
   `mock_tool_call_zendesk_search` call and one step from "API returns 401
   Unauthorized", naming the title, then a wait for the result.
 - "Still broken, please add to ticket 3 that it started after a key rotation."
-  Expect the comment read back with no tool call. After "yes", expect one
-  `mock_tool_call_zendesk_add_comment` call on ticket 3.
+  Expect a new-ticket summary read back that names ticket 3 as related, with no
+  tool call and nothing read back about ticket 3. After "yes", expect one
+  `mock_tool_call_zendesk_create_ticket` call and a new four-digit ticket
+  number; ticket 3 is not changed.
 - In a new call, "My data sync keeps failing, escalate it, high urgency."
-  Expect questions for any missing name or contact, then a read-back. Say "no,
+  Expect questions for any missing name or contact (give "Dana Test,
+  dana.test20261020@example.com"), then a read-back. Say "no,
   not yet": expect nothing filed. After a later "yes", expect one
   `mock_tool_call_zendesk_create_ticket` call and a four-digit ticket number.
 - "Check my account: jrogers@burlington.com." Expect the email spelled back, a
   `mock_tool_call_salesforce_search` call, and a request for your full name
-  before any details. With an unknown email, expect no contact found and only
-  general guidance.
+  before any details. Say "Jack Rogers": expect only the title and company (VP,
+  Facilities, Burlington Textiles Corp of America). Ask "What phone number do you
+  have for me?": expect a refusal to read back contact details. With an unknown
+  email, expect no contact found and only general guidance.
 - "I was charged twice, refund it." Expect no claim that a refund was processed
   and an offer to escalate.
 

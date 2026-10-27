@@ -86,7 +86,8 @@ for each system.
   anniversary." Expect `mock_tool_call_hotel_check_availability` and only the
   available rooms quoted; the Junior Suite is not offered because Saturday is
   sold out.
-- Pick the Classic King and give a name and email. Expect the whole reservation
+- Pick the Classic King and give "Dana Test,
+  dana.test20261020@example.com". Expect the whole reservation
   read back with the total before taxes and a question whether to book it.
   After "Yes", expect `mock_tool_call_hotel_create_reservation` once and the
   confirmation number read back character by character.

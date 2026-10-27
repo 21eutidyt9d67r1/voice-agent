@@ -100,8 +100,9 @@ for each system.
   text reported as sent (the mock queues it).
 - "Can I return the wool socks too?" Expect that final-sale items cannot be
   returned.
-- "My blender stopped working." Expect a warranty claim noted for review, never
-  "filed" or "approved".
+- "My blender stopped working." When asked for the best email or phone for
+  follow-up, give `jordan.lee@example.com`. Expect it read back and a warranty
+  claim noted for review, never "filed" or "approved".
 
 ## Boundaries
 

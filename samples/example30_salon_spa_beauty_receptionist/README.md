@@ -25,7 +25,7 @@ with an optional reminder text.
 | --- | --- |
 | `greeting` | Greet the caller and find out what they need. |
 | `service_inquiry` | Give prices and durations from the sample menu only. |
-| `book_appointment` | Capture service, stylist, and new or existing client, then offer returned open times. |
+| `book_appointment` | Capture service, stylist, and new or existing client, then offer returned open times; a time the client proposes must also come back from the tool. |
 | `confirm` | Read back the appointment, book it after a yes, and offer a reminder text. |
 | `end` | Say a short goodbye and call `end_conversation`. |
 
@@ -80,16 +80,19 @@ Playground because they act as the signed-in user.
 - "I'd like a women's haircut with Jessica on Saturday." Expect a question
   about new or existing client, then up to three 60-minute times within opening
   hours returned by `mock_tool_call_find_meeting_times`.
-- Pick a time and give an email. Expect the service, stylist, date, time, $65,
+- Pick a time and give `dana.test20261020@example.com`. Expect the service,
+  stylist, date, time, $65,
   and 60 minutes read back. After "yes", expect one
   `mock_tool_call_create_event` call, the booking reported, and a reminder
-  offer.
+  offer. If the booking fails, expect that said plainly and an offer to read
+  back the unsubmitted request.
 - Accept the reminder with "+1 500 555 0001". Expect one
   `mock_tool_call_twilio_send_message` call and the reminder reported as not
   sent. Use +14255550123 instead and it is reported as sent.
 - "How much is balayage?" Expect from $180, 3 hours, and the in-person deposit.
-- "I'm unhappy with my last color." Expect a note for the salon manager, read
-  back.
+- "I'm unhappy with my last color." Expect an offer of an unsubmitted note for
+  the salon manager, read back, with no claim that it was delivered or that
+  you are being connected.
 
 ## Boundaries
 

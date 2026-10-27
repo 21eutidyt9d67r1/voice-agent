@@ -91,6 +91,7 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/", optio
   const api = {
     creates: [], generates: [], versions: [], sockets: [], messages: [], errors: [],
     projectSelections: [], agentListQueries: [], agentReads: [],
+    voiceSelections: [],
     rejectCreate: false, createGate: null, generateGate: null, autoReply: false,
   };
   const entries = [
@@ -166,6 +167,19 @@ export async function mountStudio(page, configPatch = {}, path = "/demo/", optio
         },
       ],
     });
+    if (url.pathname === "/api/voices/resolve") {
+      const body = request.postDataJSON();
+      api.voiceSelections.push(body);
+      if (options.voiceError) return json({ error: options.voiceError }, 400);
+      const definition = structuredClone(body.definition);
+      if (!body.language) return json({ definition, region: "westus2", resolutions: [] });
+      definition.audio.output.voice = "hi-IN-SwaraNeural";
+      definition.audio.output.voice_type = "azure-standard";
+      return json({ definition, region: body.region || "centralindia", resolutions: [{
+        target: "audio.output.voice", language: body.language, voice: "hi-IN-SwaraNeural",
+        requested_voice: "hi-IN-Diya:DragonLatestNeural", changed: true,
+      }] });
+    }
     if (url.pathname === "/api/project" && request.method() === "POST") {
       const body = request.postDataJSON();
       api.projectSelections.push(body.endpoint);

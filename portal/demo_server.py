@@ -23,6 +23,8 @@ import websockets
 from aiohttp import WSMsgType, web
 from dotenv import load_dotenv
 
+from voice_policy import VOICE_POLICY_KEY, VOICE_PRESETS, VoicePolicy, VoicePolicyError
+
 # Read only this portal's ignored .env, never an ancestor or the sibling samples.
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -194,6 +196,8 @@ _ASSET_FILENAMES = (
     "webrtc-bundle.js", "webrtc-bundle.css",
     "templates.html", "template-app.js", "template-graph.js", "template-styles.css",
     "THIRD_PARTY_NOTICES.txt",
+    "voice-selection.mjs", "voice-presets.json",
+    "tool-connection.mjs",
 )
 _HANDOFF_ASSET_FILENAMES = (
     "handoff/handoff.html", "handoff/handoff-app.js",
@@ -386,6 +390,34 @@ async def mcp_probe(request: web.Request) -> web.Response:
     return await probe_published_mcp(request)
 
 
+async def resolve_voice(request: web.Request) -> web.Response:
+    """Return a copied definition with regional, language-compatible voices.
+
+    Parameters
+    ----------
+    request : web.Request
+        Definition and selection settings, scoped to the selected project.
+
+    Returns
+    -------
+    web.Response
+        Resolved definition and user-visible substitutions, or an explicit error.
+    """
+    cfg = await _request_config(request)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise VoicePolicyError("Voice settings must be a JSON object.", code="invalid_voice_request")
+        policy = request.app[VOICE_POLICY_KEY]
+        result = await asyncio.to_thread(policy.resolve, cfg, body)
+        return web.json_response(result)
+    except (json.JSONDecodeError, VoicePolicyError) as error:
+        LOGGER.error("Voice selection failed: %s", getattr(error, "code", "invalid_json"))
+        code = getattr(error, "code", "invalid_voice_request")
+        status = 502 if code in {"voice_catalog_unavailable", "voice_region_unknown"} else 400
+        return _error_response(request, str(error), status=status, code=code)
+
+
 def _mcp_auth_presets(cfg: AgentsConfig) -> list:
     presets = []
     connection = os.getenv("AZURE_VOICE_AGENTS_MCP_CONNECTION_ID", "").strip()
@@ -420,6 +452,7 @@ async def config(request: web.Request) -> web.Response:
         "byomCascadedModels": [item["deployment"] for item in deployed["cascaded"]],
         "openaiVoices": OPENAI_VOICES,
         "azureVoices": AZURE_VOICES,
+        "voiceLanguages": list(VOICE_PRESETS),
         "transcriptionModels": TRANSCRIPTION_MODELS,
         "realtimeTranscriptionModels": TRANSCRIPTION_MODELS,
         "cascadedTranscriptionModels": CASCADED_TRANSCRIPTION_MODELS,
@@ -925,7 +958,7 @@ def configure_file_logging(data_dir: Path) -> None:
     LOGGER.propagate = False
 
 
-def build_app(args) -> web.Application:
+def build_app(args: argparse.Namespace) -> web.Application:
     cfg = AgentsConfig.from_endpoint(
         args.project_endpoint,
         credential_mode=args.credential_mode,
@@ -938,6 +971,7 @@ def build_app(args) -> web.Application:
     app[DEFAULT_CONFIG_KEY] = cfg
     app[PROJECT_CONFIGS_KEY] = {}
     app[LIVE_SOCKETS_KEY] = set()
+    app[VOICE_POLICY_KEY] = VoicePolicy(discover_projects)
     app[VOICE_WS_BASE_KEY] = _local_voice_ws_base(
         os.getenv(VOICE_WS_BASE_ENV, "")
     )
@@ -954,6 +988,7 @@ def build_app(args) -> web.Application:
     app.router.add_get("/api/projects", list_foundry_projects)
     app.router.add_post("/api/project", select_foundry_project)
     app.router.add_get("/config", config)
+    app.router.add_post("/api/voices/resolve", resolve_voice)
     app.router.add_get("/deployments", deployments)
     app.router.add_get("/foundry-trace", foundry_trace)
     app.router.add_post("/api/mcp/probe", mcp_probe)

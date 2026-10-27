@@ -78,7 +78,7 @@
       "folder": "../samples/example5_customer_support",
       "name": "Example 5: Customer Support",
       "category": "Customer support",
-      "summary": "Troubleshoot from help-center articles, answer verified account questions from CRM contacts, and comment on or open a support ticket.",
+      "summary": "Troubleshoot from help-center articles, confirm a CRM account without reading contact details, and open a support ticket.",
       "accent_color": "#2563eb",
       "lock_runtime": true,
       "mcp": {
@@ -348,7 +348,7 @@
       "folder": "../samples/example23_marketing_lead_capture_agent",
       "name": "Example 23: Marketing Lead Capture",
       "category": "Sales",
-      "summary": "Capture a visitor's needs, book a sales call, or create a CRM lead for a resource follow-up.",
+      "summary": "Capture a visitor's needs, book a sales call, and create a CRM lead only with separate consent.",
       "accent_color": "#db2777",
       "lock_runtime": true,
       "mcp": {
@@ -393,7 +393,7 @@
       "folder": "../samples/example26_outbound_sales_representative",
       "name": "Example 26: Outbound Sales Representative",
       "category": "Sales",
-      "summary": "Pitch with permission, handle objections, book a demo with an account executive, and create a CRM lead.",
+      "summary": "Pitch with permission, handle objections, book a demo with an account executive, and create a CRM lead only with separate consent.",
       "accent_color": "#db2777",
       "lock_runtime": true,
       "mcp": {
@@ -423,7 +423,7 @@
       "folder": "../samples/example28_real_estate_lead_follow_up",
       "name": "Example 28: Real Estate Lead Follow-Up",
       "category": "Real estate",
-      "summary": "Follow up a property lead, discuss sample listings, book a showing, and create a CRM lead.",
+      "summary": "Follow up a property lead, discuss sample listings, book a showing, and create a CRM lead only with separate consent.",
       "accent_color": "#a16207",
       "lock_runtime": true,
       "mcp": {
@@ -438,7 +438,7 @@
       "folder": "../samples/example29_restaurant_phone_order_taker",
       "name": "Example 29: Restaurant Phone Order Taker",
       "category": "Food service",
-      "summary": "Take a pickup or delivery order from a sample menu, read back the total, and text the order summary.",
+      "summary": "Prepare an unsubmitted pickup or delivery order summary from a sample menu, read back the total, and text it.",
       "accent_color": "#ea580c",
       "lock_runtime": true,
       "mcp": {
@@ -468,7 +468,7 @@
       "folder": "../samples/example31_survey_feedback_intake",
       "name": "Example 31: Survey and Feedback Intake",
       "category": "Customer feedback",
-      "summary": "Run a four-question feedback survey one question at a time, read the answers back, and match them to the CRM record.",
+      "summary": "Run a four-question feedback survey one question at a time, read the answers back, and keep them unsubmitted.",
       "accent_color": "#0d9488",
       "lock_runtime": true,
       "mcp": {

@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { voiceGroups } from "../config.js";
 import { withSelectedAgent, withSessionTransport } from "../lib/agentUrl.mjs";
+import { resolveVoiceSelection, sessionVoiceOverride, voiceSelectionNotice } from "../../../static/voice-selection.mjs";
 import { Field, GroupedSelect, Icon } from "./ConfigControls.jsx";
 import { SessionAgentPicker } from "./SessionAgentPicker.jsx";
 
@@ -12,6 +13,10 @@ export function SessionControls({
   onLoadMoreAgents, onEditAgent, transport, transportError, transportNotice, onTransportChange,
 }) {
   const [voiceOverride, setVoiceOverride] = useState("");
+  const [voiceLanguage, setVoiceLanguage] = useState("");
+  const [voiceRegion, setVoiceRegion] = useState("");
+  const [voiceCheck, setVoiceCheck] = useState({ busy: false, message: "", error: "" });
+  const voiceRequestId = useRef(0);
   const [storeOverride, setStoreOverride] = useState("");
   const [structuredInput, setStructuredInput] = useState("");
   const [referenceAudioMode, setReferenceAudioMode] = useState("assistant");
@@ -37,6 +42,10 @@ export function SessionControls({
   useEffect(() => {
     // Do not carry an override from one model family (or edited version) into another.
     setVoiceOverride("");
+    voiceRequestId.current += 1;
+    setVoiceLanguage("");
+    setVoiceRegion("");
+    setVoiceCheck({ busy: false, message: "", error: "" });
     setStoreOverride(typeof agent?.sessionStoreDefault === "boolean" ? String(agent.sessionStoreDefault) : "");
     setStructuredInput("");
     setCopyUrlState({ text: "", kind: "", url: "" });
@@ -68,10 +77,29 @@ export function SessionControls({
     }
   };
 
-  const connect = () => session.connect(
-    agent.name, voiceOverride, storeOverride, cfg.apiVersion, transport,
-    Boolean(agent.clientReferenceEc), referenceAudioMode, structuredInput,
-  );
+  const connect = async () => {
+    const requestId = ++voiceRequestId.current;
+    setVoiceCheck({ busy: true, message: "", error: "" });
+    try {
+      const result = await resolveVoiceSelection(agent.definition, {
+        mode: voiceLanguage ? "automatic" : "fallback",
+        language: voiceLanguage,
+        voice: voiceLanguage ? "" : voiceOverride,
+        region: voiceRegion,
+      });
+      if (requestId !== voiceRequestId.current) return;
+      const selectedVoice = sessionVoiceOverride(result);
+      setVoiceCheck({ busy: false, message: voiceSelectionNotice(result), error: "" });
+      await session.connect(
+        agent.name, selectedVoice || voiceOverride, storeOverride, cfg.apiVersion, transport,
+        Boolean(agent.clientReferenceEc), referenceAudioMode, structuredInput,
+      );
+    } catch (error) {
+      if (requestId !== voiceRequestId.current) return;
+      setVoiceCheck({ busy: false, message: "", error: error.message });
+      session.logError(error.message);
+    }
+  };
   const copyAgentUrl = async () => {
     if (!agent?.name) return;
     const url = withSessionTransport(
@@ -159,6 +187,8 @@ export function SessionControls({
         <div className="form-feedback err" role="alert" id="session-transport-error">{transportError}</div>
       ) : null}
       {transportNotice ? <p className="field-hint" role="status">{transportNotice}</p> : null}
+      {voiceCheck.message ? <p className="field-hint" role="status">{voiceCheck.message}</p> : null}
+      {voiceCheck.error ? <div className="form-feedback err" role="alert">{voiceCheck.error}</div> : null}
       {typeof agent?.sessionStoreDefault === "boolean" ? (
         <p className="field-hint" role="status">
           Generated-session storage: {storeOverride === "" ? "use stored agent policy" : storeOverride === "true" ? "save transcript and audio" : "do not save"}.
@@ -191,8 +221,23 @@ export function SessionControls({
           <div className="session-settings-body">
             <div className="field-hint">Overrides apply to this connection only. The stored agent is unchanged.</div>
             <div className="field-grid">
+              <Field label="Automatic voice language"
+                hint="Selects an available voice before connection; it does not translate the greeting or change the prompt.">
+                <select value={voiceLanguage} disabled={isConnected || voiceCheck.busy || !agent}
+                  onChange={(event) => { setVoiceLanguage(event.target.value); setVoiceOverride(""); }}>
+                  <option value="">Use agent language / explicit voice</option>
+                  {(cfg.voiceLanguages || []).map((language) => (
+                    <option key={language} value={language}>{language}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Project region" optional hint="Auto-detected from Foundry. Enter the actual region only if discovery is unavailable.">
+                <input value={voiceRegion} placeholder="Auto-detect"
+                  disabled={isConnected || voiceCheck.busy}
+                  onChange={(event) => setVoiceRegion(event.target.value)} />
+              </Field>
               <Field label="Voice override">
-                <GroupedSelect value={voiceOverride} disabled={isConnected || !agent}
+                <GroupedSelect value={voiceOverride} disabled={isConnected || voiceCheck.busy || !agent || Boolean(voiceLanguage)}
                   placeholder="Use agent default" groups={voiceGroups(cfg, agent?.cascaded)}
                   onChange={(event) => setVoiceOverride(event.target.value)} />
               </Field>
@@ -266,8 +311,8 @@ export function SessionControls({
             </>
           ) : (
             <button type="button" className="primary connect-button"
-              disabled={!agent || agentListState.loading || !agentQueryMatchesSelection || Boolean(transportError)}
-              onClick={connect}><Icon name="voice" />Connect &amp; start session</button>
+              disabled={!agent || voiceCheck.busy || agentListState.loading || !agentQueryMatchesSelection || Boolean(transportError)}
+              onClick={connect}><Icon name="voice" />{voiceCheck.busy ? "Checking voice…" : "Connect & start session"}</button>
           )}
         </div>
       </div>

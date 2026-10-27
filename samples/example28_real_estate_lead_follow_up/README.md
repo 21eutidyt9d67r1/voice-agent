@@ -26,7 +26,7 @@ confirmed showing booking or information request saved to a CRM.
 | `greeting` | Introduce yourself, reference the property they viewed, and thank them. |
 | `qualify` | Understand timeline, budget, pre-approval, and what they want. |
 | `discuss_properties` | Discuss one to three matching listings from the sample facts only. |
-| `book_showing` | Offer returned showing times, send the invite after a yes, then look up or create the lead. |
+| `book_showing` | Offer returned showing times and send the invite after a yes; then offer an optional CRM save and, only after a separate yes, look up or create the lead. |
 | `send_info` | Capture which information they want and a follow-up call time, then look up or create the lead after a yes. |
 | `wrap_up` | Confirm the next step that actually happened on the call. |
 | `end` | Say a short goodbye and call `end_conversation`. |
@@ -46,7 +46,9 @@ the facts in every stage, the agent would invent details.
 | `send_info` | `mock_tool_call_salesforce_search`, `mock_tool_call_salesforce_get_contact`, `mock_tool_call_salesforce_create_lead` |
 
 The other stages have no tools. Each write runs at most once, only after the
-buyer says yes to the read-back. The agent never sends floor plans or tours
+buyer says yes to the read-back. In `book_showing`, consent to the invite is not
+consent to the CRM save: the agent reads back what would be stored and asks
+separately. The agent never sends floor plans or tours
 itself; it saves the request for the agent's team.
 
 ## Sample data
@@ -82,10 +84,14 @@ Playground because they act as the signed-in user.
 - "We want three bedrooms in Redmond under 900k. Can I see 14 Maple Court
   Saturday?" Expect listed features only, then up to three 45-minute times
   returned by `mock_tool_call_find_meeting_times`.
-- Pick a time and give "Dana Test, dana.test20261020@example.com" and a phone
-  number. Expect the address, date, time, time zone, and email read back. After
+- Pick a time and give "Dana Test, dana.test20261020@example.com" and the phone
+  number "+1 425 555 0123". Expect the address, date, time, time zone, and
+  email read back. After
   "yes", expect one `mock_tool_call_create_event` call, the invite reported as
-  sent, and a new lead created because the email is not in the CRM.
+  sent, and an offer to save your details as a CRM lead with the data read back.
+- "Yes, save it." Expect a Salesforce search and a new lead created because the
+  email is not in the CRM. Say "No" instead: expect no CRM call and that your
+  details will not be kept for follow-up.
 - "Send me the floor plans for the Kirkland condo," as Jordan Lee,
   `jordan.lee@example.com`. Expect a read-back and, after "yes", a Salesforce
   search that finds the contact, no new lead, and the request noted for Marco.

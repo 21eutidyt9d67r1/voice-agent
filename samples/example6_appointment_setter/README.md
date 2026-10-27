@@ -88,22 +88,29 @@ cannot be connected in the shared Playground and stay on mock data there; use a
 Work IQ Toolbox in your own Foundry Project instead.
 
 The example uses `gpt-realtime` with `azure_semantic_vad`, `profile: normal`,
-and `silence_duration_ms: 400`.
+`prefix_padding_ms: 800`, and `silence_duration_ms: 400`.
 
 ## Try these turns
 
 - "We want to automate support calls; I'd like a demo this week, Pacific
   time." Expect a short qualification, then a
   `mock_tool_call_find_meeting_times` call and two or three returned slots with
-  the date and time in Pacific time.
+  the date and time in Pacific time, converted with the offset in effect on
+  that date (UTC-7 during daylight saving time, UTC-8 otherwise).
+- "Could we do 7 AM instead?" Expect a new
+  `mock_tool_call_find_meeting_times` call for that window; the time is offered
+  only if the tool returns it.
 - "The first one works. Dana Test, Fabrikam, dana.test20261020@example.com."
   Expect the email spelled back and a full booking read-back with no tool call.
   Say "no, wait": expect nothing booked.
 - "Yes, send it." Expect one `mock_tool_call_create_event` call, the invite
   reported as sent, then `mock_tool_call_salesforce_search` finding no contact
-  and one `mock_tool_call_salesforce_create_lead` call.
-- In a new call, "I'm not ready yet, follow up next month." Expect the nurture
-  path: name, company, email, and follow-up time read back, then after "yes" a
+  and one `mock_tool_call_salesforce_create_lead` call. If the invite fails,
+  expect the agent to say it could not be created and read the meeting details
+  back.
+- In a new call, "I'm not ready yet, follow up next month. Dana Test, Fabrikam,
+  dana.test20261020@example.com." Expect the nurture path: name, company,
+  email, and follow-up time read back, then after "yes" a
   Salesforce search and a lead for a new email. Expect no claim that case
   studies or a brief were sent.
 

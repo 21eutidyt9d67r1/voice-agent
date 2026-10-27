@@ -787,9 +787,13 @@ async function publishMyAgent(autoOpen = false) {
     }
     clearInterval(buildProgressTimer);
     const version = published.version ? ` (version ${published.version})` : "";
+    const voiceChanges = (published.voice_selection?.resolutions || [])
+      .filter((selection) => selection.changed)
+      .map((selection) => `${selection.target}: ${selection.voice} (${selection.language})`)
+      .join("; ");
     setResult(
       "tpl-result",
-      `${published.agent_name}${version} was published in '${published.backend}'.`,
+      `${published.agent_name}${version} was published in '${published.backend}'.${voiceChanges ? ` Voice fallback: ${voiceChanges}` : ""}`,
       "good",
     );
     setBuildProgress(

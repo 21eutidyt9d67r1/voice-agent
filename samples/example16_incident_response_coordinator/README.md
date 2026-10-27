@@ -82,7 +82,8 @@ for each system.
 
 ## Try these turns
 
-- "Checkout is down for all customers since 10 minutes ago. I'm Dana." Expect a
+- "Checkout is down for all customers since 10 minutes ago. I'm Dana, callback
+  +1 425 555 0123." Expect a
   P0 or P1 classification and one sentence saying what the page will say, with
   a request to confirm; no tool runs yet.
 - "Yes, page them." Expect `mock_tool_call_twilio_send_message` to the primary

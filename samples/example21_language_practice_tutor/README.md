@@ -79,7 +79,8 @@ Playground because they act as the signed-in user.
 - "I'm intermediate in French." Expect advanced practice and a recap in French.
 - "Can you book my next session for Friday? I'm on Pacific time." Expect
   `mock_tool_call_find_meeting_times` and two or three returned slots.
-- Pick a slot and give your email. Expect the date, time, time zone, and email
+- Pick a slot and give `dana.test20261020@example.com`. Expect the date, time,
+  time zone, and email
   read back with a question. After "yes", expect `mock_tool_call_create_event`
   once and the booked weekday, date, and time.
 - "No, I'll book later." Expect no booking and a brief goodbye.
