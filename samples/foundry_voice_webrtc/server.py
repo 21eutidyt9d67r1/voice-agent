@@ -25,6 +25,7 @@ from aiohttp import web
 from dotenv import load_dotenv
 
 from auth import AuthenticationError, AzureTokenProvider, authentication_mode, find_azure_cli
+from live import LIVE_VOICES, LiveSessionError, connect_live, live_definition
 
 ROOT = Path(__file__).resolve().parent
 LOGGER = logging.getLogger(__name__)
@@ -102,6 +103,7 @@ HD_VOICES = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler",
 MAI_FLASH_VOICES = {"en-US-Harper:MAI-Voice-2.1-Flash", "en-GB-Harry:MAI-Voice-2.1-Flash"}
 NATIVE_VOICES = {"ava", "andrew", "emma", "clara", "liam", "natasha", "rayn", "alvaro", "dalia", "jorge"}
 MODELS = {"gpt-realtime-2.1", "azure-realtime", "gpt-5.4"}
+LIVE_MODEL = "gpt-live-1"
 TRANSCRIPTION_MODELS = {
     "azure-speech", "azure-speech-streaming", "azure-llm-speech",
     "mai-transcribe", "mai-transcribe-2", "mai-transcribe-2-streaming",
@@ -332,6 +334,8 @@ class Settings:
     public_origin: str = ""
     personalization_required: bool = False
     allow_agent_recreate: bool = False
+    live_deployment: str = "gpt-live-1"
+    live_backend_deployment: str = "gpt-5.4"
 
     def __post_init__(self):
         object.__setattr__(self, "agent", self.agent.strip() or DEFAULT_AGENT_NAME)
@@ -394,7 +398,9 @@ def load_settings():
                     os.getenv("AZURE_API_VERSION", "v1"),
                     os.getenv("FOUNDRY_FEATURES", "VoiceAgents=V1Preview"), tuple(ice),
                     public_origin, os.getenv("PERSONALIZATION_REQUIRED", "").lower() == "true",
-                    os.getenv("ALLOW_AGENT_RECREATE", "").lower() == "true")
+                    os.getenv("ALLOW_AGENT_RECREATE", "").lower() == "true",
+                    os.getenv("GPT_LIVE_DEPLOYMENT", "gpt-live-1").strip(),
+                    os.getenv("GPT_LIVE_BACKEND_DEPLOYMENT", "gpt-5.4").strip())
 
 
 def origin_allowed(host_value, scheme, origin, public_origin=""):
@@ -434,7 +440,8 @@ async def public_config(request):
                               "setupIssues": cfg.setup_issues,
                               "personalizationRequired": cfg.personalization_required,
                               "agentRecreateAllowed": cfg.allow_agent_recreate,
-                              "models": sorted(MODELS),
+                              "models": sorted(MODELS | {LIVE_MODEL}),
+                              "liveVoices": sorted(LIVE_VOICES),
                               "transcriptionModels": sorted(TRANSCRIPTION_MODELS),
                               "defaultTranscriptionModel": DEFAULT_TRANSCRIPTION_MODEL,
                               "transports": ["websocket", "webrtc"], "defaultTransport": "websocket"})
@@ -523,6 +530,8 @@ async def inspect_configured_agent(client, cfg, headers):
     required = set(demo["structured_inputs"])
     return {"agent": cfg.agent, "exists": definition is not None,
             "model": (demo if definition is None else definition).get("model"),
+            "modelChoice": LIVE_MODEL if (definition or {}).get("sub_protocol") == "live" else
+                (demo if definition is None else definition).get("model"),
             "transcriptionModel": transcription_model(demo if definition is None else definition),
             "version": latest.get("version") if latest is not None else None,
             "weatherEnabled": definition is not None and weather_toolbox_attached(definition),
@@ -556,6 +565,7 @@ async def prepare_configured_agent(client, cfg, headers):
             raise AgentPreparationError(f"Agent enable failed (HTTP {enabled.status}). Retry preparation; an existing version will not be overwritten.")
     required = set(json.loads((ROOT / "personalized-agent.json").read_text())["structured_inputs"])
     return {"agent": cfg.agent, "created": created, "model": definition.get("model"),
+            "modelChoice": LIVE_MODEL if definition.get("sub_protocol") == "live" else definition.get("model"),
             "transcriptionModel": transcription_model(definition),
             "version": version,
             "weatherEnabled": weather_toolbox_attached(definition),
@@ -639,7 +649,7 @@ async def change_agent_model(request):
     except ValueError:
         return web.json_response({"error": "Choose a model and the current Agent version."}, status=400)
     if (not isinstance(body, dict) or set(body) not in ({"model", "version"}, {"model", "version", "transcriptionModel"})
-            or not isinstance(body["model"], str) or body["model"] not in MODELS
+            or not isinstance(body["model"], str) or body["model"] not in MODELS | {LIVE_MODEL}
             or not isinstance(body["version"], str) or not body["version"]
             or ("transcriptionModel" in body and (
                 not isinstance(body["transcriptionModel"], str) or body["transcriptionModel"] not in TRANSCRIPTION_MODELS))):
@@ -657,11 +667,38 @@ async def change_agent_model(request):
                 if latest.get("version") != body["version"]:
                     return web.json_response({"error": "The Agent version changed. Reload the page before saving."}, status=409)
                 expected_version = latest["version"]
-                definition = model_definition(latest["definition"], body["model"], body.get("transcriptionModel"))
+                metadata = copy.deepcopy(latest.get("metadata") or {})
+                source = latest["definition"]
+                was_live = source.get("sub_protocol") == "live"
+                if body["model"] == LIVE_MODEL:
+                    if "transcriptionModel" in body:
+                        raise AgentPreparationError("GPT Live owns transcription; do not select a separate transcription model.")
+                    if was_live:
+                        definition = copy.deepcopy(source)
+                    else:
+                        if not cfg.live_deployment or not cfg.live_backend_deployment:
+                            raise AgentPreparationError("Configure GPT_LIVE_DEPLOYMENT and GPT_LIVE_BACKEND_DEPLOYMENT.")
+                        definition = live_definition(source, cfg.live_deployment, cfg.live_backend_deployment)
+                        metadata["realtime_source_version"] = latest["version"]
+                else:
+                    if was_live:
+                        version = metadata.get("realtime_source_version")
+                        if not isinstance(version, str) or not version:
+                            raise AgentPreparationError("This GPT Live Agent has no original realtime version to restore. Choose a separate realtime Agent.")
+                        url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions/{quote(version, safe='')}"
+                        async with client.get(url, params={"api-version": cfg.api_version}, headers=headers,
+                                              allow_redirects=False) as response:
+                            if response.status != 200:
+                                raise AgentPreparationError("Could not read the original realtime version. No replacement was saved.")
+                            source = (await response.json()).get("definition")
+                        if not isinstance(source, dict) or source.get("sub_protocol") == "live":
+                            raise AgentPreparationError("The original realtime definition could not be verified.")
+                        metadata.pop("realtime_source_version", None)
+                    definition = model_definition(source, body["model"], body.get("transcriptionModel"))
                 if definition != latest["definition"]:
                     url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions"
                     async with client.post(url, params={"api-version": cfg.api_version}, headers=headers,
-                                           json={"definition": definition, "metadata": latest.get("metadata") or {}},
+                                           json={"definition": definition, "metadata": metadata},
                                            allow_redirects=False) as response:
                         if response.status not in {200, 201}:
                             raise AgentPreparationError(
@@ -676,7 +713,7 @@ async def change_agent_model(request):
                     if response.status != 204:
                         raise AgentPreparationError("The model version was saved but could not be enabled. Retry setup before starting a call.")
                 result = await inspect_configured_agent(client, cfg, headers)
-                if (result.get("version") != expected_version or result.get("model") != body["model"]
+                if (result.get("version") != expected_version or result.get("modelChoice") != body["model"]
                         or ("transcriptionModel" in body and result.get("transcriptionModel") != body["transcriptionModel"])):
                     raise AgentPreparationError("The saved settings changed or could not be verified. Reload before retrying.")
                 return web.json_response(result)
@@ -976,7 +1013,7 @@ async def connect_voice(client, cfg, headers, transport):
 
 def describe_connection_error(error):
     """Return actionable diagnostics without exposing URLs, keys or raw exceptions."""
-    if isinstance(error, (AuthenticationError, VoiceEndpointError, SessionConfigurationError)):
+    if isinstance(error, (AuthenticationError, VoiceEndpointError, SessionConfigurationError, LiveSessionError)):
         return str(error)
     if isinstance(error, aiohttp.WSServerHandshakeError):
         if error.status == 401:
@@ -1020,7 +1057,8 @@ async def bridge(request):
         await browser.prepare(request)
         structured = None
         voice = request.query.get("voice", "")
-        if voice and voice not in HD_VOICES | MAI_FLASH_VOICES | NATIVE_VOICES:
+        live = request.query.get("protocol") == "live"
+        if voice and voice not in (LIVE_VOICES if live else HD_VOICES | MAI_FLASH_VOICES | NATIVE_VOICES):
             raise ValueError("Choose a supported demo output voice.")
         if cfg.personalization_required and request.query.get("personalize") != "true":
             raise ValueError("This Agent requires session personalization.")
@@ -1033,6 +1071,20 @@ async def bridge(request):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=35)) as client:
             token = await request.app[TOKENS].get_token(client)
             headers = {"Authorization": f"Bearer {token}", "Foundry-Features": cfg.features}
+            async def announce_conversation(conversation):
+                await browser.send_json({
+                    "type": "bridge.conversation", "conversationId": conversation,
+                    "downloadToken": conversation_download_token(request.app[DOWNLOAD_SECRET], cfg.agent, conversation),
+                })
+            if live:
+                latest = await lookup_configured_agent(client, cfg, headers, include_version=True)
+                if latest is None or latest["definition"].get("sub_protocol") != "live":
+                    raise LiveSessionError("Save the GPT Live model version before starting a live session.")
+                if voice:
+                    headers["x-ms-voice-session-override"] = json.dumps({"audio": {"output": {"voice": voice}}})
+                await connect_live(client, browser, cfg, headers, transport, latest["version"], announce_conversation,
+                                   json.loads(structured) if structured is not None else None)
+                return browser
             if structured is not None:
                 headers["x-ms-voice-structured-inputs"] = structured
             if voice:
@@ -1041,11 +1093,6 @@ async def bridge(request):
                         "azure-realtime-native" if voice in NATIVE_VOICES else "azure-standard"}}
                 })
             async with connect_voice(client, cfg, headers, transport) as upstream:
-                async def announce_conversation(conversation):
-                    await browser.send_json({
-                        "type": "bridge.conversation", "conversationId": conversation,
-                        "downloadToken": conversation_download_token(request.app[DOWNLOAD_SECRET], cfg.agent, conversation),
-                    })
                 await relay(browser, upstream, transport, on_conversation=announce_conversation)
     except Exception as exc:
         # Never send auth exceptions, headers or tokens to the browser or logs.
