@@ -17,8 +17,20 @@ class WeatherAssetsTests(unittest.IsolatedAsyncioTestCase):
                 response.headers["Content-Security-Policy"],
             )
             self.assertIn("export function parseWeather", await response.text())
+            response = await client.get("/city-scenes.mjs")
+            self.assertEqual(response.status, 200)
+            self.assertIn("javascript", response.content_type)
+            self.assertIn("export function drawCityScene", await response.text())
+            response = await client.get("/city-nature.mjs")
+            self.assertEqual(response.status, 200)
+            self.assertIn("javascript", response.content_type)
+            self.assertIn("export function cityNature", await response.text())
             response = await client.get("/")
-            self.assertIn('id="weather-scene"', await response.text())
+            html = await response.text()
+            self.assertIn('id="weather-scene"', html)
+            self.assertIn('label for="scene-city"', html)
+            for city in ("seattle", "mumbai", "tokyo", "paris", "beijing", "new-york"):
+                self.assertIn(f'<option value="{city}">', html)
 
 
 if __name__ == "__main__":

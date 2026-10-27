@@ -9,7 +9,29 @@
 </head>
 <body>
   <canvas id="weather-scene" aria-hidden="true"></canvas>
-  <div class="scenery-toolbar" role="group" aria-label="Scenery controls"><p id="scenery-call-note" class="scenery-call-note">Active calls continue. Show panels to access call controls.</p><div><button id="weather-motion" type="button" aria-pressed="false" aria-label="Pause scenery" title="Pause scenery">Pause scenery</button><button id="scenery-toggle" type="button" aria-pressed="false" aria-label="Scenery only" aria-controls="app-header app-content app-footer" aria-describedby="scenery-call-note" title="Scenery only. Active calls continue.">Scenery only</button></div><a class="scenery-attribution" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a></div>
+  <div class="scenery-toolbar" role="group" aria-label="Scenery controls">
+    <p id="scenery-call-note" class="scenery-call-note">Active calls continue. Show panels to access call controls.</p>
+    <div class="scene-picker">
+      <label for="scene-city">City scene</label>
+      <select id="scene-city" aria-describedby="scene-landmark scenery-weather">
+        <option value="seattle">Seattle</option>
+        <option value="mumbai">Mumbai</option>
+        <option value="tokyo">Tokyo</option>
+        <option value="paris">Paris</option>
+        <option value="beijing">Beijing</option>
+        <option value="new-york">New York</option>
+      </select>
+    </div>
+    <p id="scene-landmark" class="scene-landmark">Space Needle &amp; Mount Rainier · United States</p>
+    <div class="scenery-actions">
+      <button id="weather-motion" type="button" aria-pressed="false" aria-label="Pause scenery" title="Pause scenery">Pause scenery</button>
+      <button id="scenery-toggle" type="button" aria-pressed="false" aria-label="Scenery only" aria-controls="app-header app-content app-footer" aria-describedby="scenery-call-note" title="Scenery only. Active calls continue.">Scenery only</button>
+    </div>
+    <div class="scenery-meta">
+      <p id="scenery-weather" class="scenery-weather">Loading Seattle weather...</p>
+      <a class="scenery-attribution" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a>
+    </div>
+  </div>
   <header id="app-header"><a class="brand" href="/">◉ <span>Voice Agent In Foundry Agent Service</span></a><span class="tag">AZURE FOUNDRY <span> / </span> LIVE VOICE</span><a class="repository-link" href="https://github.com/microsoft/voice-agent" target="_blank" rel="noopener noreferrer">microsoft/voice-agent on GitHub</a></header>
   <main id="app-content">
     <section class="intro"><p class="eyebrow">YOUR FIRST VOICE AGENT</p><h1>A little more human.</h1><p>Speak or type. Hear a reply. Interrupt naturally.</p><div class="weather-controls"><span id="weather-status" role="status">Loading Seattle weather...</span><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather: Open-Meteo</a></div></section>

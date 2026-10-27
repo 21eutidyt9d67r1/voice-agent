@@ -241,12 +241,14 @@ test('Conversation download waits for End and posts only its session capability'
 
 test('Scenery controls remain outside the panels they hide', async () => {
   const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
-  for (const id of ['weather-motion', 'scenery-toggle']) {
+  for (const id of ['weather-motion', 'scenery-toggle', 'scene-city']) {
     assert.equal(html.split(`id="${id}"`).length, 2);
     assert.ok(html.indexOf(`id="${id}"`) < html.indexOf('<header id="app-header"'));
   }
   assert.match(html, /aria-controls="app-header app-content app-footer"/);
   assert.match(html, /Active calls continue/);
+  assert.match(html, /aria-describedby="scene-landmark scenery-weather"/);
+  assert.match(html, /class="scenery-meta"/);
 });
 
 test('Session controls and saved summary precede collapsed Agent and audio settings', async () => {
