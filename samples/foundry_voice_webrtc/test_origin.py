@@ -29,6 +29,15 @@ class OriginTests(unittest.TestCase):
 
 
 class AssetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_returned_cost_module_is_served_without_local_pricing(self):
+        async with TestClient(TestServer(create_app(Settings("", "")))) as client:
+            config = await (await client.get("/api/config")).json()
+            self.assertNotIn("callPricing", config)
+            module = await client.get("/call-cost.mjs")
+            self.assertEqual(module.status, 200)
+            self.assertIn("export function returnedCallCost", await module.text())
+            self.assertEqual((await client.get("/call-prices.json")).status, 404)
+
     async def test_page_links_to_a_served_svg_favicon(self):
         async with TestClient(TestServer(create_app(Settings("", "")))) as client:
             page = await client.get("/")

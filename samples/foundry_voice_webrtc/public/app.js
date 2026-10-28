@@ -1,5 +1,6 @@
 import { PcmAudio, validateAudioSession } from './pcm-audio.mjs';
 import { RetainedHistory } from './retained-history.mjs';
+import { returnedCallCost } from './call-cost.mjs';
 
 const $ = (id) => document.getElementById(id);
 let config, call = null;
@@ -281,6 +282,7 @@ function createHistory(session) {
 function stop(title = 'Conversation ended', hint = 'Start again whenever you’re ready.') {
   const old = call; call = null;
   if (old) {
+    if (old.beganAt !== undefined) showCallCost(old);
     clearTimeout(old.timeout); clearTimeout(old.disconnectTimer); clearTimeout(old.closeTimer); clearInterval(old.clock);
     old.history?.dispose();
     old.abort.abort(); old.ws?.close(); old.peer?.close(); old.audio?.dispose();
@@ -296,10 +298,29 @@ function stop(title = 'Conversation ended', hint = 'Start again whenever you’r
   updateTextInput();
   state(title, hint, 'Offline');
 }
+function showCallCost(session) {
+  const seconds = Math.max(0, ((session.endedAt ?? Date.now()) - session.beganAt) / 1000);
+  const result = returnedCallCost(session.returnedCost, seconds);
+  $('call-cost').hidden = false;
+  $('call-cost-total-label').textContent = result.status === 'partial' ? 'Priced subtotal (partial)' : 'API-estimated call total';
+  $('call-cost-total').textContent = result.available ? `$${result.total.toFixed(6)} USD` : 'Unavailable';
+  $('call-cost-minute').textContent = result.available && result.perMinute !== null ?
+    `$${result.perMinute.toFixed(6)} USD/min${result.status === 'partial' ? ' (partial)' : ''}` : 'Unavailable';
+  $('call-cost-note').textContent = result.available ?
+    `${seconds.toFixed(1)} connected seconds · ${session.model}. ${result.status === 'partial' ? 'Partial: some components are not priced.' : 'Complete API estimate.'} ` +
+    'Returned by the saved Agent API from finalized usage at public retail rates, not your negotiated Azure invoice.' :
+    result.reason;
+  $('call-cost-details').textContent = result.available ?
+    `Price version: ${result.priceVersion}. Unpriced components: ${result.unpriced.join(', ') || 'none reported'}. ` +
+    'Cost/minute is the returned session amount divided by connected call minutes, excluding connection setup and the final close wait. ' +
+    'No assumed token counts, silence discount or local pricing model is applied. App hosting, networking, storage and other charges outside the API estimate are not added.' :
+    'No duration-based price or sum of response costs is substituted. GPT Live uses a separate protocol and may return voice duration without a monetary cost.';
+}
 function endCall() {
   const session = call;
-  if (!session?.live || !session.ready || session.ws?.readyState !== WebSocket.OPEN) return stop();
-  if (session.closing) return;
+  if (session?.closing) return;
+  if (session && session.endedAt === undefined) session.endedAt = Date.now();
+  if (!session?.ready || session.ws?.readyState !== WebSocket.OPEN) return stop();
   session.closing = true;
   session.ready = false;
   session.mic?.getAudioTracks().forEach(track => { track.enabled = false; });
@@ -307,12 +328,13 @@ function endCall() {
   $('stop').disabled = true;
   $('mute').disabled = true;
   updateTextInput();
-  state('Ending conversation', 'Waiting for GPT Live to confirm final usage.', 'Closing');
+  $('remote-audio').pause();
+  state('Ending conversation', 'Waiting for the Agent API to finalize usage and cost.', 'Closing');
   session.ws.send(JSON.stringify({type:'session.close'}));
   session.closeTimer = setTimeout(() => {
-    stop('Conversation ended', 'GPT Live did not confirm final session usage.');
-    showError('GPT Live close acknowledgment timed out; final usage is unconfirmed.');
-  }, 16000);
+    stop('Conversation ended', 'The Agent API did not confirm final session usage.');
+    showError('Agent close acknowledgment timed out; final usage and cost may be unavailable.');
+  }, 25000);
 }
 function fail(session, error) {
   if (call !== session) return;
@@ -338,6 +360,9 @@ function markReady(session) {
     'Say hello or send a text message. Your agent will respond.', 'Connected');
   if (!session.clock) {
     const began = Date.now();
+    session.beganAt = began;
+    session.model ??= savedModel;
+    $('call-cost').hidden = true;
     session.clock = setInterval(() => {
       const seconds = Math.floor((Date.now() - began) / 1000);
       $('elapsed').textContent = `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
@@ -394,6 +419,17 @@ async function connectWebRtc(session) {
 async function handleEvent(session, event) {
   if (call !== session) return;
   const type = event.type || '';
+  if (type === 'session.done' || type === 'session.closed') {
+    if (event.estimated_cost !== undefined) session.returnedCost = event.estimated_cost;
+    session.endedAt ??= Date.now();
+    if (type === 'session.closed') {
+      session.closed = true;
+      stop('Conversation ended', session.live ?
+        `GPT Live final cumulative voice usage: ${event.usage?.seconds ?? 'unavailable'} seconds.` :
+        'Final session usage received. See the API-returned cost below.');
+    }
+    return;
+  }
   if (session.live && type.startsWith('session.')) {
     if (type === 'session.input_transcript.delta' || type === 'session.output_transcript.delta') {
       const role = type === 'session.input_transcript.delta' ? 'user' : 'assistant';
@@ -404,12 +440,9 @@ async function handleEvent(session, event) {
       record.text += event.delta || '';
       record.end = event.end_ms;
       transcript(record);
-    } else if (type === 'session.output_audio.delta' && session.audio) {
+    } else if (type === 'session.output_audio.delta' && session.audio && !session.closing) {
       session.audio.play(event.delta);
       if (session.audio.context.state === 'suspended') $('play').hidden = false;
-    } else if (type === 'session.closed') {
-      session.closed = true;
-      stop('Conversation ended', `GPT Live final cumulative voice usage: ${event.usage?.seconds ?? 'unavailable'} seconds.`);
     }
     return;
   }
@@ -465,7 +498,7 @@ async function handleEvent(session, event) {
     const text = Array.isArray(event.item.content) ? event.item.content.map(part => part.text || part.transcript || '').join('') : '';
     if (text) session.history.user(event.item.id, text);
     else session.history.reserveUser(event.item.id);
-  } else if (['response.audio.delta', 'response.output_audio.delta'].includes(type) && session.audio) {
+  } else if (['response.audio.delta', 'response.output_audio.delta'].includes(type) && session.audio && !session.closing) {
     const responseId = event.response_id || session.responseId;
     if (event.delta && !session.userSpeaking && (!session.interruptedResponse || responseId !== session.interruptedResponse)) {
       session.audio.play(event.delta);
@@ -498,6 +531,7 @@ async function start() {
     english_only:$('english-only').checked,
   } : null;
   const session = {abort:new AbortController(), muted:false, transport:$('transport').value, ready:false, personalization,
+    model:savedModel,
     live:savedModel === 'gpt-live-1',
     voice:savedModel === 'gpt-live-1' ? $('live-voice').value :
       savedModel === 'azure-realtime' ? $('native-voice').value : $('voice').value}; call = session;
