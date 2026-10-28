@@ -102,7 +102,7 @@ HD_VOICES = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler",
     "en-IN-Diya:DragonHDLatestNeural", "zh-CN-Xiaoqi:DragonHDFlashLatestNeural", "zh-CN-Xiaoke:DragonHDFlashLatestNeural"}
 MAI_FLASH_VOICES = {"en-US-Harper:MAI-Voice-2.1-Flash", "en-GB-Harry:MAI-Voice-2.1-Flash"}
 NATIVE_VOICES = {"ava", "andrew", "emma", "clara", "liam", "natasha", "rayn", "alvaro", "dalia", "jorge"}
-MODELS = {"gpt-realtime-2.1", "azure-realtime", "gpt-5.4"}
+MODELS = {"gpt-realtime-2.1", "azure-realtime", "azure-realtime-flash-2026-10-14", "gpt-5.4"}
 LIVE_MODEL = "gpt-live-1"
 TRANSCRIPTION_MODELS = {
     "azure-speech", "azure-speech-streaming", "azure-llm-speech",
