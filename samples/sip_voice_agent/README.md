@@ -158,6 +158,8 @@ For **digest**, fill `SIP_USERNAME` and `SIP_PASSWORD` in your local, git-ignore
 the SIP client/PBX credential store. Do not put credentials in command-line
 arguments or commit them. Leave `SIP_AUTH_TYPE` unset for the default digest mode,
 or explicitly set `SIP_AUTH_TYPE=digest`.
+Environment-variable interpolation is disabled when reading `.env`, so `${...}`
+inside a password is preserved rather than expanded.
 
 For **IP ACL**, set `SIP_AUTH_TYPE=ip_acl` and `SIP_SOURCE_CIDRS` to a non-empty,
 comma-separated list of your actual public SIP signaling egress IPs/CIDRs. Digest
@@ -291,11 +293,14 @@ and Connections used by other applications.
 
 ## Offline validation
 
+After installing the requirements in step 1, run from the sample directory:
+
 ```powershell
-python -m unittest discover -s tests -v
+.venv/Scripts/python -m unittest discover -s tests -v
 ```
 
-Tests use mock HTTP responses and credentials without calling live services.
+Tests use the real dotenv parser and mock HTTP responses and credentials without
+calling live services.
 They cover direct model Responses delegation, required deployment configuration,
 connection reuse and creation, digest/IP ACL validation, ARM token isolation, secret-free output, exact binding
 fields, URL escaping, ETag cleanup, and failure propagation.

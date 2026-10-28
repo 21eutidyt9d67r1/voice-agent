@@ -51,7 +51,7 @@ def project_endpoint(value: str | None) -> str:
             parsed.hostname or "",
         )
         or parsed.port not in (None, 443) or parsed.username
-        or parsed.password or parsed.query or parsed.fragment
+        or parsed.password or "?" in endpoint or "#" in endpoint
         or not parsed.path.startswith("/api/projects/")
         or len(parsed.path.split("/")) != 4
         or not parsed.path.split("/")[-1]
@@ -289,7 +289,7 @@ def main() -> None:
     except ModuleNotFoundError:
         pass
     else:
-        load_dotenv()
+        load_dotenv(interpolate=False)
     args = build_parser().parse_args()
     if getattr(args, "dry_run", False):
         result = execute(args, None)

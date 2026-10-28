@@ -235,6 +235,19 @@ class SampleTests(unittest.TestCase):
             with self.subTest(endpoint=endpoint):
                 self.assertEqual(sample.project_endpoint(endpoint + "/"), endpoint)
 
+    def test_empty_query_or_fragment_delimiters_fail_before_token_or_http(self):
+        valid = "https://resource.services.ai.azure.com/api/projects/demo"
+        for suffix in ("?", "#", "?#", "/?", "/#", "?/", "#/"):
+            with self.subTest(suffix=suffix):
+                session = Mock()
+                credential = Mock()
+                with self.assertRaises(ValueError):
+                    sample.project_endpoint(valid + suffix)
+                with self.assertRaises(ValueError):
+                    sample.request(session, credential, valid + suffix, "GET", "/agents/demo")
+                credential.get_token.assert_not_called()
+                session.request.assert_not_called()
+
     def test_untrusted_endpoint_is_rejected_before_token_or_request(self):
         for authority in (
             "example.com", "localhost", "127.0.0.1", "[::1]",
@@ -495,6 +508,41 @@ class ConnectionTests(unittest.TestCase):
         self.credential.get_token.assert_called_once_with(sample.ARM_TOKEN_SCOPE)
         self.session.__exit__.assert_called_once()
         self.credential.__exit__.assert_called_once()
+
+    def test_main_preserves_literal_dotenv_password_through_arm_creation(self):
+        from dotenv import load_dotenv
+
+        self.session.__enter__ = Mock(return_value=self.session)
+        self.session.__exit__ = Mock(return_value=False)
+        self.credential.__enter__ = Mock(return_value=self.credential)
+        self.credential.__exit__ = Mock(return_value=False)
+        password = " before-${SIP_TEST_SET}-${SIP_TEST_UNSET}-after "
+        for quote in ("'", '"'):
+            with self.subTest(quote=quote):
+                self.session.request.reset_mock()
+                self.session.request.side_effect = [response(status=404), response(status=200), self.existing()]
+                config = io.StringIO(f"SIP_USERNAME=caller\nSIP_PASSWORD={quote}{password}{quote}\n")
+                loader = Mock(side_effect=lambda config=config, **kwargs: load_dotenv(stream=config, **kwargs))
+                modules = {
+                    "dotenv": SimpleNamespace(load_dotenv=loader),
+                    "requests": SimpleNamespace(Session=Mock(return_value=self.session)),
+                    "azure.identity": SimpleNamespace(DefaultAzureCredential=Mock(return_value=self.credential)),
+                }
+                environment = {"PROJECT_RESOURCE_ID": self.resource_id, "SIP_CONNECTION_NAME": "inbound",
+                               "SIP_TEST_SET": "must-not-expand"}
+                with patch.dict(sample.os.environ, environment, clear=True), patch.dict(
+                    sample.sys.modules, modules,
+                ), patch.object(sample.sys, "argv", ["sip_voice_agent.py", "connection"]), contextlib.redirect_stdout(
+                    io.StringIO(),
+                ) as output:
+                    sample.main()
+                calls = self.session.request.call_args_list
+                self.assertEqual([call.args[0] for call in calls], ["GET", "PUT", "GET"])
+                self.assertEqual(calls[1].kwargs["json"]["properties"]["credentials"]["keys"]["password"], password)
+                loader.assert_called_once_with(interpolate=False)
+                self.assertEqual(json.loads(output.getvalue())["status"], "created")
+                self.assertNotIn(password, output.getvalue())
+                self.assertNotIn("must-not-expand", output.getvalue())
 
 
 if __name__ == "__main__":
