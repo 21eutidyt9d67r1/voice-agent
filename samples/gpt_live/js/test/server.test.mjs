@@ -1,0 +1,174 @@
+// Offline server tests: a real HTTP server, and the real Projects SDK talking to an in-memory
+// project. The server prepares agents, serves the page, and gives its own page access tokens.
+import assert from "node:assert/strict";
+import http from "node:http";
+import { describe, it } from "node:test";
+
+import { LIVE_API_VERSION } from "../public/live-transport.js";
+import { TOKEN_SCOPE, main } from "../server.mjs";
+import { MCP_SERVER_URL } from "../tools.mjs";
+import { ENDPOINT, ENV, OfflineProject, clientOptions } from "./offline.mjs";
+
+/**
+ * Starts the sample on a free port with offline stand-ins. After startup, the credential
+ * records the scopes the page's token requests ask for and can be made to fail.
+ */
+async function start({ argv = [], project = new OfflineProject() } = {}) {
+  const scopes = [];
+  let started = false;
+  const credential = {
+    failure: undefined,
+    getToken: async (scope) => {
+      if (started) {
+        scopes.push(scope);
+        if (credential.failure) throw credential.failure;
+      }
+      return { token: "offline-test-token", expiresOnTimestamp: 1234 };
+    },
+  };
+  const lines = [];
+  const running = await main({
+    argv: [...argv, "--port", "0"],
+    env: ENV,
+    credential,
+    clientOptions: clientOptions(project),
+    log: (line) => lines.push(line),
+  });
+  started = true;
+  return { running, project, lines, scopes, credential };
+}
+
+/** Runs `test` against a started sample and always stops it. */
+async function withServer(options, test) {
+  const context = await start(options);
+  try {
+    await test(context);
+  } finally {
+    await context.running.stop();
+  }
+}
+
+/** Sends a request with exact headers, which fetch would add to or refuse. */
+function request(port, path, { method = "GET", headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const outgoing = http.request({ host: "127.0.0.1", port, path, method, headers }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => (body += chunk));
+      response.on("end", () => resolve({ status: response.statusCode, type: response.headers["content-type"], body }));
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
+/** The headers a browser sends for the page's own fetch("/token", { method: "POST" }). */
+const ownPage = (port, host = "localhost") => ({
+  host: `${host}:${port}`,
+  origin: `http://${host}:${port}`,
+  "sec-fetch-site": "same-origin",
+});
+
+describe("HTTP surface", () => {
+  it("serves the page, the bundled page script, and the agent configuration", async () => {
+    const { running, project } = await start();
+    const { port } = running;
+    const page = await request(port, "/");
+    assert.equal(page.status, 200);
+    assert.match(page.body, /GPT Live English teacher/);
+    // The page script bundles the SDK's Live client and the browser transport.
+    const script = await request(port, "/app.js");
+    assert.equal(script.status, 200);
+    assert.match(script.type, /text\/javascript/);
+    assert.ok(script.body.includes("authorization.bearer.") && script.body.includes(LIVE_API_VERSION));
+    assert.ok(!script.body.includes('from "ws"'));
+    for (const path of ["/pcm-capture.js", "/style.css"]) assert.equal((await request(port, path)).status, 200, path);
+    for (const path of ["/live-session.js", "/server.mjs", "/../agents.mjs", "/%2e%2e/agents.mjs", "/package.json"]) {
+      assert.equal((await request(port, path)).status, 404, path);
+    }
+    const config = JSON.parse((await request(port, "/config")).body);
+    assert.match(config.downloader, /download_conversation_artifacts\.py$/);
+    assert.deepEqual(
+      { ...config, downloader: undefined },
+      {
+        endpoint: ENDPOINT,
+        agent: { name: project.created[0].name, version: "3", managedDelegation: false, backendModel: "text-model" },
+        delegation: "Responses",
+        downloader: undefined,
+      },
+    );
+    await running.stop();
+  });
+
+  it("gives its own page an access token for Foundry", () =>
+    withServer({}, async ({ running, lines, scopes }) => {
+      for (const host of ["localhost", "127.0.0.1"]) {
+        const response = await request(running.port, "/token", { method: "POST", headers: ownPage(running.port, host) });
+        assert.equal(response.status, 200);
+        assert.deepEqual(JSON.parse(response.body), { token: "offline-test-token", expiresOnTimestamp: 1234 });
+      }
+      assert.deepEqual(scopes, [TOKEN_SCOPE, TOKEN_SCOPE]);
+      assert.ok(lines.includes("Gave the page an access token for a GPT Live session."));
+    }));
+
+  it("refuses tokens to other sites, rebinding hosts, and plain GET requests", () =>
+    withServer({}, async ({ running: { port }, scopes }) => {
+      for (const headers of [
+        { ...ownPage(port), origin: "https://example.com", "sec-fetch-site": "cross-site" },
+        { ...ownPage(port), "sec-fetch-site": "same-site" },
+        { host: `localhost:${port}` },
+        // DNS rebinding: another name that resolves to this server.
+        { host: `attacker.example:${port}`, origin: `http://attacker.example:${port}`, "sec-fetch-site": "same-origin" },
+      ]) {
+        assert.equal((await request(port, "/token", { method: "POST", headers })).status, 403, JSON.stringify(headers));
+      }
+      assert.equal((await request(port, "/token", { headers: ownPage(port) })).status, 404);
+      assert.deepEqual(scopes, []);
+    }));
+
+  it("tells the page to run az login when the credential fails", () =>
+    withServer({}, async ({ running, credential }) => {
+      credential.failure = Object.assign(new Error("Please run az login."), { name: "CredentialUnavailableError" });
+      const response = await request(running.port, "/token", { method: "POST", headers: ownPage(running.port) });
+      assert.equal(response.status, 500);
+      assert.match(response.body, /Run az login/);
+    }));
+
+  it("has no Live relay", () =>
+    withServer({}, async ({ running }) => {
+      const upgrade = await request(running.port, "/live", {
+        headers: { connection: "Upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGVzdA==" },
+      }).catch((error) => error);
+      assert.ok(upgrade instanceof Error || upgrade.status === 404);
+    }));
+});
+
+describe("agent lifecycle", () => {
+  it("keeps agents by default and offers the download command", async () => {
+    const { running, project, lines } = await start();
+    await running.stop();
+    assert.deepEqual(project.deleted, []);
+    assert.ok(lines.some((line) => line.startsWith("Kept agent: ")));
+  });
+
+  it("deletes only this run's agents with --auto-delete and offers no download command", async () => {
+    const { running, project } = await start({ argv: ["--auto-delete"] });
+    const config = JSON.parse((await request(running.port, "/config")).body);
+    await running.stop();
+    assert.equal(config.downloader, null);
+    assert.deepEqual(project.deleted, [project.created[0].name]);
+  });
+
+  it("creates the tools prompt agent and a GPT Live agent pinned to it with --managed", async () => {
+    const { running, project } = await start({ argv: ["--managed", "--auto-delete"] });
+    const config = JSON.parse((await request(running.port, "/config")).body);
+    await running.stop();
+    const [prompt, voice] = project.created;
+    assert.deepEqual(prompt.definition.tools.map((tool) => tool.type), ["mcp", "function"]);
+    assert.equal(prompt.definition.tools[0].server_url, MCP_SERVER_URL);
+    assert.match(voice.definition.instructions, /MCP calculator and a client-computer clock function/);
+    assert.match(config.delegation, /MCP calculator, local date\/time function/);
+    assert.deepEqual(config.agent, { name: voice.name, version: "3", managedDelegation: true, backendModel: `${prompt.name}:7` });
+    assert.deepEqual(project.deleted, [voice.name, prompt.name]);
+  });
+});

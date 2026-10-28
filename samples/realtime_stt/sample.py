@@ -21,7 +21,7 @@ from azure.core.exceptions import AzureError
 from azure.identity.aio import DefaultAzureCredential
 from dotenv import load_dotenv
 
-from samples.gpt_live.audio_common import FRAME_BYTES, FRAMES, RATE, Audio, AudioError
+from samples.gpt_live.python.audio_common import FRAME_BYTES, FRAMES, RATE, Audio, AudioError
 
 logger = logging.getLogger(__name__)
 transcript_logger = logging.getLogger(f"{__name__}.transcripts")

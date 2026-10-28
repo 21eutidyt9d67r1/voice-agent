@@ -4,6 +4,8 @@
 import json
 from datetime import datetime, timezone
 
+from azure.ai.projects.models import FunctionTool, MCPTool
+
 import prompt_agent_delegation as managed
 from response_delegation import DemoError
 
@@ -28,47 +30,45 @@ TOOL_INSTRUCTIONS = """You also help the learner with integer addition and the c
 """
 
 
-def prompt_agent_payload(name, model):
-    payload = managed.prompt_agent_payload(name, model)
-    payload["definition"]["instructions"] = TOOL_INSTRUCTIONS + managed.PROMPT_INSTRUCTIONS
-    payload["definition"]["tools"] = [
-        {
-            "type": "mcp",
-            "server_label": "calculator",
-            "server_url": MCP_SERVER_URL,
+def prompt_agent_definition(model):
+    definition = managed.prompt_agent_definition(model)
+    definition.instructions = TOOL_INSTRUCTIONS + managed.PROMPT_INSTRUCTIONS
+    definition.tools = [
+        MCPTool(
+            server_label="calculator",
+            server_url=MCP_SERVER_URL,
             # This public test server requires no credentials. Only expose addition.
-            "allowed_tools": ["add"],
-            "require_approval": "never",
-        },
-        {
-            "type": "function",
-            "name": DATETIME_TOOL_NAME,
-            "description": (
+            allowed_tools=["add"],
+            require_approval="never",
+        ),
+        FunctionTool(
+            name=DATETIME_TOOL_NAME,
+            description=(
                 "Get the current date and time on the client computer, including "
                 "its local timezone/UTC offset and the corresponding UTC time."
             ),
-            "parameters": {
+            parameters={
                 "type": "object",
                 "properties": {},
                 "required": [],
                 "additionalProperties": False,
             },
-            "strict": True,
-        },
+            strict=True,
+        ),
     ]
-    return payload
+    return definition
 
 
-def voice_agent_payload(name, model, prompt_name, prompt_version):
-    payload = managed.voice_agent_payload(name, model, prompt_name, prompt_version)
-    payload["definition"]["instructions"] += (
+def voice_agent_definition(model, prompt_name, prompt_version):
+    definition = managed.voice_agent_definition(model, prompt_name, prompt_version)
+    definition.instructions += (
         "\nAlso always delegate integer-addition calculations and current-date/time "
         "questions to the backend prompt agent before answering. It has an MCP "
         "calculator and a client-computer clock function. Do not calculate or "
         "guess the time yourself. For other arithmetic, explain that this example "
         "only demonstrates integer addition."
     )
-    return payload
+    return definition
 
 
 def get_current_datetime():
@@ -104,30 +104,20 @@ class ManagedToolHandler:
         self.response_ids = {}
         self.pending = {}
         self.finished = set()
-        self.retired_delegations = set()
         self.answered = set()
 
     async def __call__(self, connection, envelope, transcript):
-        delegation_id = getattr(envelope, "delegation_id", None)
-        if envelope.type in {
-            "session.managed_delegation.completed",
-            "session.managed_delegation.failed",
-        }:
-            self.retired_delegations.add(delegation_id)
-            self.response_ids.pop(delegation_id, None)
-            for key in list(self.pending):
-                if key[0] == delegation_id:
-                    del self.pending[key]
-            return
+        # Envelopes are SDK models, or dicts for events the SDK does not model;
+        # both are mappings.
+        delegation_id = envelope.get("delegation_id")
         if (
-            envelope.type != "response.event"
+            envelope.get("type") != "response.event"
             or not isinstance(delegation_id, str)
             or not delegation_id
-            or delegation_id in self.retired_delegations
         ):
             return
 
-        event = envelope.event
+        event = envelope["event"]
         kind = event.get("type")
         response = event.get("response") or {}
         response_id = (
@@ -187,8 +177,8 @@ async def main(*, create_only=False, auto_delete=False):
     await managed.main(
         create_only=create_only,
         auto_delete=auto_delete,
-        prompt_payload=prompt_agent_payload,
-        voice_payload=voice_agent_payload,
+        prompt_definition=prompt_agent_definition,
+        voice_definition=voice_agent_definition,
         event_handler=ManagedToolHandler(),
     )
 

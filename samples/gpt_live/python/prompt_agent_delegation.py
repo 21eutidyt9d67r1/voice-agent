@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a prompt agent, pin it to a GPT Live voice agent, and talk using the OpenAI SDK."""
+"""Create a prompt agent, pin it to a GPT Live voice agent, and talk using the Azure AI Projects SDK."""
 
 import argparse
 import asyncio
@@ -7,26 +7,29 @@ import contextlib
 import os
 import sys
 from pathlib import Path
-from urllib.parse import quote
 from uuid import uuid4
 
-import httpx
-from azure.core.exceptions import ClientAuthenticationError
+from azure.ai.projects.aio import AIProjectClient
+from azure.ai.projects.models import (
+    PromptAgentDefinition,
+    PromptAgentDefinitionTextOptions,
+    TextResponseFormatText,
+    VoiceAgentLiveDefinition,
+    VoiceAgentLiveManagedAgentDelegation,
+)
+from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 
-from audio_common import Audio, AudioError, RATE
+from audio_common import Audio, AudioError
 from response_delegation import (
-    API_VERSION,
-    PREVIEW,
     DemoError,
     ENGLISH_TEACHER_INSTRUCTIONS,
-    EntraAuth,
-    check_response,
     converse,
+    live_audio,
     project_credential,
     project_endpoint,
     required,
+    service_errors,
 )
 from transcript_common import TranscriptDisplay
 
@@ -52,59 +55,44 @@ Example:
 """
 
 
-def prompt_agent_payload(name, model):
-    return {
-        "name": name,
-        "definition": {
-            "kind": "prompt",
-            "model": model,
-            "instructions": PROMPT_INSTRUCTIONS,
-            # Managed delegation requires plain text, not a JSON output schema.
-            "text": {"format": {"type": "text"}},
-        },
-    }
+def prompt_agent_definition(model):
+    return PromptAgentDefinition(
+        model=model,
+        instructions=PROMPT_INSTRUCTIONS,
+        # Managed delegation requires plain text, not a JSON output schema.
+        text=PromptAgentDefinitionTextOptions(format=TextResponseFormatText()),
+    )
 
 
-def voice_agent_payload(name, model, prompt_name, prompt_version):
-    return {
-        "name": name,
-        "definition": {
-            "kind": "voice",
-            "sub_protocol": "live",
-            "model_type": "self_deployed",
-            "model": model,
-            "instructions": ENGLISH_TEACHER_INSTRUCTIONS + (
-                "\nBackchannel policy: Briefly acknowledge the learner while waiting."
-                "\nInterruption policy: Stop speaking and listen when interrupted."
-                "\nDelegation policy: Your backend is an English-teacher specialist. "
-                "Always delegate grammar corrections, explanations, and lesson planning "
-                "before answering. Handle greetings and casual conversation yourself. "
-                "Do not guess the specialist's answer while waiting. Present accepted "
-                "commentary naturally without mentioning tags or internal agents. "
-                "Thinking is factual context, not text to read aloud. Do not delegate "
-                "again just to repeat guidance already received."
-            ),
-            "audio": {
-                "format": {"type": "audio/pcm", "rate": RATE},
-                "output": {"voice": "marin"},
-            },
-            "delegation": {
-                "type": "foundry_managed_agent",
-                "agent_name": prompt_name,
-                "agent_version": str(prompt_version),
-                # tagged_text is the default, as in the Foundry demo portal.
-            },
-            "store": True,
-        },
-    }
+def voice_agent_definition(model, prompt_name, prompt_version):
+    return VoiceAgentLiveDefinition(
+        model=model,
+        instructions=ENGLISH_TEACHER_INSTRUCTIONS + (
+            "\nBackchannel policy: Briefly acknowledge the learner while waiting."
+            "\nInterruption policy: Stop speaking and listen when interrupted."
+            "\nDelegation policy: Your backend is an English-teacher specialist. "
+            "Always delegate grammar corrections, explanations, and lesson planning "
+            "before answering. Handle greetings and casual conversation yourself. "
+            "Do not guess the specialist's answer while waiting. Present accepted "
+            "commentary naturally without mentioning tags or internal agents. "
+            "Thinking is factual context, not text to read aloud. Do not delegate "
+            "again just to repeat guidance already received."
+        ),
+        audio=live_audio(),
+        # tagged_text is the default result format, as in the Foundry demo portal.
+        delegation=VoiceAgentLiveManagedAgentDelegation(
+            agent_name=prompt_name, agent_version=str(prompt_version)
+        ),
+        store=True,
+    )
 
 
 async def main(
     *,
     create_only=False,
     auto_delete=False,
-    prompt_payload=None,
-    voice_payload=None,
+    prompt_definition=None,
+    voice_definition=None,
     event_handler=None,
 ):
     """Share the managed-agent lifecycle with the tools example."""
@@ -116,28 +104,19 @@ async def main(
     suffix = uuid4().hex[:12]
     prompt_name = f"english-teacher-prompt-{suffix}"
     voice_name = f"english-teacher-live-{suffix}"
-    agent_url = f"{base}/agents/{quote(voice_name, safe='')}"
     created = []
     credential = project_credential()
-    auth = EntraAuth(credential)
 
     async with (
         credential,
-        httpx.AsyncClient(
-            auth=auth,
-            headers={"Foundry-Features": PREVIEW},
-            timeout=30,
-            follow_redirects=False,
-        ) as http,
+        # allow_preview sends the VoiceAgents=V1Preview feature header for voice agents.
+        AIProjectClient(endpoint=base, credential=credential, allow_preview=True) as project,
     ):
         # Validate both deployments before creating either agent. Do not create models.
         for setting, model in deployments.items():
-            response = await http.get(
-                f"{base}/deployments/{quote(model, safe='')}",
-                params={"api-version": API_VERSION},
-            )
-            check_response(response, f"Check {setting}='{model}'")
-            if response.json().get("name") != model:
+            with service_errors(f"Check {setting}='{model}'"):
+                deployment = await project.deployments.get(model)
+            if deployment.name != model:
                 raise DemoError(f"Deployment readback did not match {setting}='{model}'.")
 
         try:
@@ -146,47 +125,42 @@ async def main(
                 print(f"Prompt agent: {prompt_name}\nVoice agent: {voice_name}", flush=True)
 
                 # 1. Create the same-project prompt agent and use its returned version.
-                response = await http.post(
-                    f"{base}/agents",
-                    params={"api-version": API_VERSION},
-                    json=(prompt_payload or prompt_agent_payload)(
-                        prompt_name, deployments["RESPONSE_DELEGATION_DEPLOYMENT"]
-                    ),
-                )
-                check_response(response, "Create prompt agent")
+                with service_errors("Create prompt agent"):
+                    prompt = await project.agents.create_version(
+                        prompt_name,
+                        definition=(prompt_definition or prompt_agent_definition)(
+                            deployments["RESPONSE_DELEGATION_DEPLOYMENT"]
+                        ),
+                    )
                 created.append(prompt_name)
-                prompt_version = str(response.json()["versions"]["latest"]["version"])
+                prompt_version = str(prompt.version)
                 print(f"Created prompt agent: {prompt_name}:{prompt_version}", flush=True)
 
                 # 2. Create GPT Live with a pinned managed-agent reference, NOT responses.
-                payload = (voice_payload or voice_agent_payload)(
-                    voice_name,
+                definition = (voice_definition or voice_agent_definition)(
                     deployments["GPT_LIVE_DEPLOYMENT"],
                     prompt_name,
                     prompt_version,
                 )
-                response = await http.post(
-                    f"{base}/agents",
-                    params={"api-version": API_VERSION},
-                    json=payload,
-                )
-                check_response(response, "Create GPT Live voice agent")
+                with service_errors("Create GPT Live voice agent"):
+                    voice = await project.agents.create_version(
+                        voice_name, definition=definition
+                    )
                 created.append(voice_name)
-                voice_version = str(response.json()["versions"]["latest"]["version"])
+                voice_version = str(voice.version)
                 print(f"Created voice agent: {voice_name}:{voice_version}", flush=True)
 
-                response = await http.get(
-                    f"{agent_url}/versions/{quote(voice_version, safe='')}",
-                    params={"api-version": API_VERSION},
-                )
-                check_response(response, "Read voice-agent version")
-                saved = response.json()["definition"]
+                with service_errors("Read voice-agent version"):
+                    saved = (
+                        await project.agents.get_version(voice_name, voice_version)
+                    ).definition
+                # Readback returns delegation as a plain dict; both sides are mappings.
                 target = saved.get("delegation") or {}
                 if (
-                    saved.get("sub_protocol") != "live"
+                    not isinstance(saved, VoiceAgentLiveDefinition)
                     or any(
                         target.get(key) != value
-                        for key, value in payload["definition"]["delegation"].items()
+                        for key, value in definition.delegation.items()
                     )
                     or target.get("result_format", "tagged_text") != "tagged_text"
                 ):
@@ -201,43 +175,28 @@ async def main(
                     )
                     return
 
-                # 3. The same OpenAI Live SDK transport as the original sample.
+                # 3. The same SDK Live connection as the original sample.
                 # Foundry owns prompt execution, backend conversations, and forwarding
                 # accepted commentary/thinking. The tools example additionally handles
                 # explicit backend function calls through event_handler.
-                async with AsyncOpenAI(
-                    api_key=auth.token_provider,
-                    base_url=f"{agent_url}/endpoint/protocols/voice",
-                    max_retries=0,
-                ) as client:
-                    async with client.live.connect(
-                        extra_headers={"Foundry-Features": PREVIEW},
-                        extra_query={
-                            "api-version": API_VERSION,
-                            "x-agent-version-override": voice_version,
-                        },
-                        max_retries=0,
-                        websocket_connection_options={
-                            "open_timeout": 20,
-                            "close_timeout": 5,
-                            "max_size": 1024 * 1024,
-                        },
-                    ) as connection:
-                        # Foundry sends session.start; converse waits for session.started.
-                        async with TranscriptDisplay() as transcript:
-                            conversation_id = await converse(
-                                connection,
-                                audio,
-                                transcript,
-                                f"{prompt_name}:{prompt_version}",
-                                managed_delegation=True,
-                                event_handler=event_handler,
-                            )
+                async with project.beta.voice_agents.live.connect(
+                    agent_name=voice_name, agent_version=voice_version
+                ) as connection:
+                    # Foundry sends session.start; converse waits for session.started.
+                    async with TranscriptDisplay() as transcript:
+                        conversation_id = await converse(
+                            connection,
+                            audio,
+                            transcript,
+                            f"{prompt_name}:{prompt_version}",
+                            managed_delegation=True,
+                            event_handler=event_handler,
+                        )
                 if conversation_id:
                     print(f"Conversation id: {conversation_id}", flush=True)
                     if not auto_delete:
                         downloader = (
-                            Path(__file__).resolve().parent.parent
+                            Path(__file__).resolve().parents[2]
                             / "download_conversation_artifacts.py"
                         )
                         command_prefix = "& " if os.name == "nt" else ""
@@ -257,12 +216,8 @@ async def main(
                     )
                     continue
                 try:
-                    response = await http.delete(
-                        f"{base}/agents/{quote(name, safe='')}",
-                        params={"api-version": API_VERSION},
-                    )
-                    if response.status_code != 404:
-                        check_response(response, f"Delete agent '{name}'")
+                    with contextlib.suppress(ResourceNotFoundError):
+                        await project.agents.delete(name)
                     print(f"Deleted temporary agent: {name}", flush=True)
                 except Exception as exc:
                     print(
@@ -287,7 +242,8 @@ def run_cli(main_function=None, *, description=__doc__):
     )
     args = parser.parse_args()
     try:
-        load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
+        # samples/gpt_live/.env is shared by the Python and JavaScript samples.
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
         asyncio.run(
             (main_function or main)(
                 create_only=args.create_only, auto_delete=args.auto_delete
