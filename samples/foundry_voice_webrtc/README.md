@@ -14,7 +14,9 @@ definitions are reused by default. An optional confirmed reset can delete and
 recreate only the configured sample Agent. The agent retains its saved instructions, model, and
 voice configuration by default. The backend sends a narrow `session.update` for
 the **active session only** to enable automatic interruption truncation and
-retained-item events, preserving the applied turn-detection settings. This
+retained-item events, preserving the applied turn-detection settings, except for
+Azure Realtime Flash, where automatic truncation and retained-item enrichment
+are disabled. This
 session update does not edit the saved Agent; the browser cannot send one.
 Optional session-start personalization and output-voice selection do not edit the saved Agent.
 
@@ -313,6 +315,11 @@ the caller's first turn. Saving this model also removes a greeting from an
 existing Flash definition. The previous greeting is retained in version metadata
 and restored when switching back to another realtime model. Other models keep
 their configured greetings. This does not resolve unrelated Flash inference errors.
+Flash also disables automatic interruption truncation (`auto_truncate: false`)
+for both WebSocket and WebRTC sessions, while keeping interruption enabled.
+The retained-item include selector is removed for Flash, and the transcript
+warns that interrupted text may include unheard output. Other realtime models
+continue using automatic truncation and authoritative retained-item events.
 
 New Agents default to **`mai-transcribe-2`**. Existing Agents retain their saved
 choice until explicitly changed. The selector offers these exact IDs:
@@ -732,6 +739,10 @@ preserves the reported VAD type/options and the **whole existing include list**,
 adds `conversation.item.truncated.item` without duplicates, and sets
 `auto_truncate: true` and its prerequisite `interrupt_response: true`.
 It does not change instructions, model, voice, tools, formats, or saved agents.
+For `azure-realtime-flash-2026-10-14`, the same handshake instead sets
+`auto_truncate: false`, keeps `interrupt_response: true`, and removes only
+`conversation.item.truncated.item` from the include list. Input remains disabled
+until Azure acknowledges truncation is off and the selector is absent.
 A disabled/missing VAD or disabled automatic responses is reported as a setup
 error rather than silently replacing the saved turn-detection mode.
 

@@ -62,6 +62,8 @@ function applyAgentDetails(result) {
     "Start a conversation to send text. Press Enter or Send for a text-only reply; wait for the agent's response before sending another message. Mute the mic to use text only.";
   $('history-help').textContent = savedModel === 'gpt-live-1' ?
     'GPT Live captions are timed speech fragments, not complete turns or authoritative retained history. Listening and speaking can overlap.' :
+    savedModel === 'azure-realtime-flash-2026-10-14' ?
+    'Automatic interruption truncation is disabled for this model. Interrupted replies may still show text that was not heard; the transcript is not authoritative retained history.' :
     "Replies stream here as live drafts. After an interruption, only the service's retained text remains; unheard text is removed.";
   if (result.personalizationRequired) {
     config.personalizationRequired = true;

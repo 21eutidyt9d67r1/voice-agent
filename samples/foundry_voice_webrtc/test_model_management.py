@@ -102,9 +102,11 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
     def test_flash_disables_greeting_even_when_the_model_is_already_selected(self):
         original = self.definition()
         original["model"] = FLASH_MODEL
+        original["audio"]["input"]["turn_detection"]["auto_truncate"] = True
         snapshot = copy.deepcopy(original)
         changed = model_definition(original, FLASH_MODEL, "azure-speech")
         self.assertNotIn("greeting", changed)
+        self.assertIs(changed["audio"]["input"]["turn_detection"]["auto_truncate"], False)
         self.assertEqual(transcription_model(changed), "azure-speech")
         self.assertEqual(original, snapshot)
         self.assertEqual(model_definition(changed, FLASH_MODEL), changed)
@@ -120,6 +122,7 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
         latest["definition"] = model_definition(latest["definition"], FLASH_MODEL)
         restored = copy.deepcopy(original)
         restored["versions"]["latest"]["version"] = "3"
+        restored["versions"]["latest"]["definition"]["audio"]["input"]["turn_detection"]["auto_truncate"] = False
         for before, after, target in (
             (original, flash, FLASH_MODEL),
             (flash, flash, FLASH_MODEL),

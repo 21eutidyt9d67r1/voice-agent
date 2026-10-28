@@ -72,7 +72,7 @@ async def check():
                         events.append(event.get("type"))
                         if await configuration.observe(event, ws):
                             print(json.dumps({"ok": True, "stage": "session_ready", "events": events,
-                                              "note": "Retained-history settings acknowledged; no microphone audio or user turn was sent."}))
+                                              "note": "Model-specific interruption settings acknowledged; no microphone audio or user turn was sent."}))
                             return 0
                         if event.get("type") == "error":
                             print(json.dumps({"ok": False, "stage": "service_error", "events": events}))

@@ -60,6 +60,19 @@ async function setup(transport, overrides = {}) {
 }
 
 for (const transport of ['websocket', 'webrtc']) {
+  test(`${transport}: Flash warns that automatic truncation and authoritative retained history are disabled`, async () => {
+    const ui = await setup(transport, {
+      fetch: async url => ({ok:true, json:async()=>url === '/api/config' ?
+        {configured:true} : {exists:true, model:'azure-realtime-flash-2026-10-14', version:'1'}}),
+    });
+    assert.match(ui.element('history-help').textContent, /Automatic interruption truncation is disabled/);
+    assert.match(ui.element('history-help').textContent, /not authoritative retained history/);
+    ui.session.configured = true;
+    ui.markReady(ui.session);
+    assert.equal(ui.session.ready, true);
+    assert.equal(ui.element('text-input').disabled, false);
+  });
+
   test(`${transport}: graceful close displays API cost exactly once and excludes setup/close wait`, async () => {
     let now = 1000;
     const ui = await setup(transport, {
