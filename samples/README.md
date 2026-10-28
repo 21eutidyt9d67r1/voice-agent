@@ -34,6 +34,7 @@ independent shared MCP reference implementation, start with the
 | [Create, converse, and evaluate](conversation_evaluation/README.md) | Create one stored Voice Agent and run four three-turn sessions with real audio input/output; evaluate actual spoken transcripts, compare successful and deliberately failed tasks, and export WAVs/results with bounded polling and persistence checks. |
 | [Data Zone and regional realtime Voice Agents](realtime_datazone_voice_agent.md) | Create or reuse a voice-first Agent with an explicit managed model and hands-free microphone conversation. See the sample guide for region/model combinations and routing prerequisites. |
 | [Foundry GPT Live with Responses delegation](gpt_live/python/README.md) | Create an English-teacher agent or reuse `AGENT_NAME`, stream microphone audio with Responses delegation, and print the conversation ID and download command after close. |
+| [SIP Voice Agent with GPT Live](sip_voice_agent/README.md) | Create a GPT Live Agent with direct model Responses delegation, create or reuse a SIP inbound Connection, bind it, inspect call records, and remove test routing. Includes digest/IP ACL setup and offline tests. |
 | [Foundry GPT Live with managed prompt-agent delegation](gpt_live/python/README.md#managed-prompt-agent-delegation) | Create a prompt agent first, pin its version to a new GPT Live voice agent, then stream microphone audio with Foundry-managed delegation. |
 | [Foundry GPT Live with prompt-agent tools](gpt_live/python/README.md#managed-prompt-agent-with-mcp-and-local-function-tools) | Give the managed prompt agent an MCP addition calculator and a local current date/time function. |
 | [Foundry GPT Live in the browser](gpt_live/js/README.md) | Talk to the same Responses or managed prompt-agent English teacher from a browser with your microphone. The page opens the Live session directly with the preview `@azure/ai-projects` package; a small Node.js server creates the agents and gives the page an access token. The managed mode adds the MCP calculator and a local date/time function. |
@@ -129,6 +130,10 @@ and a bundled preview `azure-ai-projects` 2.10.0 wheel from `dist/` for the GPT 
 models and Live WebSocket client. The browser sample in `gpt_live/js/` uses Node.js 22+ and
 the bundled preview `@azure/ai-projects` package from `dist/` instead. Follow their READMEs
 for configuration and installation.
+
+The SIP sample in `sip_voice_agent/` is standalone and uses its own
+`requirements.txt` and local `.env`. Follow its README for SIP client/PBX setup;
+it does not open a local microphone or require the Projects SDK or PortAudio.
 
 ## Common Python sample prerequisites
 
