@@ -743,6 +743,7 @@ For `azure-realtime-flash-2026-10-14`, the same handshake instead sets
 `auto_truncate: false`, keeps `interrupt_response: true`, and removes only
 `conversation.item.truncated.item` from the include list. Input remains disabled
 until Azure acknowledges truncation is off and the selector is absent.
+The runtime model ID `azure-realtime-flash-1` receives the same Flash policy.
 A disabled/missing VAD or disabled automatic responses is reported as a setup
 error rather than silently replacing the saved turn-detection mode.
 

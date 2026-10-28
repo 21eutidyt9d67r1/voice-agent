@@ -68,7 +68,7 @@ class ConfigurationTests(unittest.IsolatedAsyncioTestCase):
     async def test_flash_ready_after_disable_ack_for_both_transports(self):
         for transport in ("websocket", "webrtc"):
             original = saved_session(transport == "websocket")
-            original["model"] = FLASH_MODEL
+            original["model"] = "azure-realtime-flash-1"
             config, upstream, browser = SessionConfiguration(), AsyncMock(), AsyncMock()
             upstream.__aiter__.side_effect = lambda: frames([
                 {"type": "session.updated", "session": original},
