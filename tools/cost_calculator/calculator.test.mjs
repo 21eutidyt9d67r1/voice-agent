@@ -30,7 +30,7 @@ test("every supported model/hosting/pipeline combination resolves without a miss
   }
 });
 
-test("Azure Realtime uses Pro native audio and Fast uses Lite realtime text plus HD", () => {
+test("Azure Realtime uses Pro and Fast uses Lite native speech-to-speech billing", () => {
   for (const [id, tier, expected] of [
     ["azure-realtime", "Pro", [4, 0.4, 16, 32, 0.4, 64]],
     ["azure-realtime-fast", "Lite", [0.11, 0.04, 0.44, 4, 0.04, 12]],
@@ -39,6 +39,7 @@ test("Azure Realtime uses Pro native audio and Fast uses Lite realtime text plus
     assert.equal(m.tier, tier);
     assert.equal(Boolean(m.tierAssumption), id === "azure-realtime-fast");
     const pipeline = m.managedPipeline;
+    assert.equal(pipeline, "native");
     const { rates, sources, usesGlobalReference } = getRates(snapshot, m, "managed", pipeline);
     assert.equal(usesGlobalReference, false);
     const keys = ["textInput", "textCached", "textOutput", "audioInput", "audioCached", "audioOutput"];
@@ -49,27 +50,14 @@ test("Azure Realtime uses Pro native audio and Fast uses Lite realtime text plus
     });
     const result = calculate({ ...DEFAULTS, nativeText: 150 }, pipeline, rates);
     const [textInput, textCached, textOutput, audioInput, audioCached, audioOutput] = expected;
-    if (pipeline === "hybrid") {
-      close(rates.speechOutput, 25);
-      assert.equal(sources.speechOutput.meterName, "Voice Live API Lite - Standard Speech Audio Output Tokens");
-      assert.equal(sources.speechOutput.armRegionName, "centralindia");
-      close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
-        360 * audioInput + 540 * audioCached + 720 * 25) / 1e6);
-      assert.ok(result.rows.some(r => r.key === "speechOutput"));
-      assert.ok(result.rows.every(r => !["audioOutput", "speechInput", "liveMinute"].includes(r.key)));
-      const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, pipeline, rates);
-      close(noCache.list, (20225 * textInput + 900 * audioInput + 150 * textOutput + 720 * 25) / 1e6);
-      const reasoning = calculate({ ...DEFAULTS, reasoning: 100 }, pipeline, rates);
-      close(reasoning.list - result.list, 100 * textOutput / 1e6);
-      const silent = calculate({ ...DEFAULTS, silencePercent: 100 }, pipeline, rates);
-      close(silent.list, (5000 * textInput + 15225 * textCached + 150 * textOutput) / 1e6);
-    } else {
-      close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
-        360 * audioInput + 1620 * audioCached + 720 * audioOutput) / 1e6);
-      assert.ok(result.rows.every(r => !["speechInput", "speechOutput", "liveMinute"].includes(r.key)));
-      const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, pipeline, rates);
-      close(noCache.list, (20000 * textInput + 1980 * audioInput + 720 * audioOutput) / 1e6);
-    }
+    close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
+      360 * audioInput + 1620 * audioCached + 720 * audioOutput) / 1e6);
+    assert.ok(result.rows.some(r => r.key === "audioOutput"));
+    assert.ok(result.rows.every(r => !["speechInput", "speechOutput", "liveMinute"].includes(r.key)));
+    const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, pipeline, rates);
+    close(noCache.list, (20000 * textInput + 1980 * audioInput + 720 * audioOutput) / 1e6);
+    const silent = calculate({ ...DEFAULTS, nativeText: 150, silencePercent: 100 }, pipeline, rates);
+    close(silent.list, (5000 * textInput + 15225 * textCached + 150 * textOutput) / 1e6);
     close(result.listPerMinute, result.list / 1.5);
     assert.deepEqual(result.missing, []);
   }
@@ -78,7 +66,7 @@ test("Azure Realtime uses Pro native audio and Fast uses Lite realtime text plus
 test("Azure models use their correct managed pipeline, never substituted with GPT BYOM rates", () => {
   for (const id of ["azure-realtime", "azure-realtime-fast"]) {
     for (const hosting of ["managed", "byom"]) for (const pipeline of ["native", "hybrid", "cascade", "live"]) {
-      const supported = hosting === "managed" && pipeline === (id === "azure-realtime-fast" ? "hybrid" : "native");
+      const supported = hosting === "managed" && pipeline === "native";
       assert.equal(supportsScenario(model(id), hosting, pipeline), supported);
       if (!supported) assert.throws(() => getRates(snapshot, model(id), hosting, pipeline), /no BYOM or alternative-pipeline rates/);
     }

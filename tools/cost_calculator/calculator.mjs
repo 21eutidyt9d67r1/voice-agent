@@ -16,7 +16,7 @@ export const MODELS = [
   { id: "gpt-realtime-1.5", name: "GPT Realtime 1.5", tier: "Pro", realtime: true },
   { id: "azure-realtime", name: "Azure Realtime", tier: "Pro", realtime: true, managedPipeline: "native" },
   { id: "azure-realtime-fast", name: "Azure Realtime Fast", tier: "Lite", realtime: true,
-    managedPipeline: "hybrid", tierAssumption: true },
+    managedPipeline: "native", tierAssumption: true },
   { id: "gpt-4.1", name: "GPT-4.1", tier: "Pro" },
   { id: "gpt-4.1-mini", name: "GPT-4.1 mini", tier: "Std" },
   { id: "gpt-4.1-nano", name: "GPT-4.1 nano", tier: "Lite" },
