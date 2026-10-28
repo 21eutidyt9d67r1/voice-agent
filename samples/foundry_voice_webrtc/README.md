@@ -210,6 +210,39 @@ voice selector. Other supported HD settings are preserved. Model and voice
 availability depend on the project; adding Flash to the selector does not deploy
 or enable it in the Foundry project.
 
+### Post-call API-returned cost
+
+After a connected call ends, **Last call · API-returned cost** shows the saved
+Agent API's finalized session `estimated_cost.amount` in USD, and that amount
+divided by connected call minutes. The estimate uses the service's finalized
+billing-meter quantities and public retail rates, not assumed tokens, speaking
+time, cache hit rates, a silence discount, or the Cost Lab's planning profile.
+It is not the customer's negotiated or invoiced amount.
+
+The backend opts realtime Agent connections into
+`features=include_estimated_cost:true`. **End call** mutes microphone input and
+requests `session.close`, keeping the signaling connection alive for final
+`session.done` / `session.closed` events. Repeated cumulative cost snapshots are
+replacements, never added together or added to response-level costs. The last
+result remains visible until another call connects. Average cost/minute uses the
+time from connection readiness to the end request (or first terminal event),
+excluding setup and the final close wait; the total itself is never prorated.
+
+The UI preserves `complete`, `partial`, and `unavailable` semantics. A partial
+amount is labeled **Priced subtotal (partial)**, with unpriced component names and
+the returned price version in the details. Missing/invalid costs, an interrupted
+connection without a final snapshot, and a close timeout show **Unavailable**,
+not zero or a sum of observed turns. A failed connection before readiness does
+not create a call result. Charges outside the service's returned estimate,
+such as app hosting, networking and recording storage, are not added locally.
+
+This contract was verified through the saved Agent's
+`/agents/{name}/endpoint/protocols/voice` route with `gpt-realtime-2.1`.
+GPT Live uses a separate native protocol: its `usage.seconds` is not a monetary
+cost. It shows a cost only if its terminal event actually supplies
+`estimated_cost`; otherwise the result is explicitly unavailable. Flash and
+other models likewise rely on the returned API cost, not a local tier mapping.
+
 ### GPT Live
 
 GPT Live uses a self-deployed `gpt-live-1` model and the separate native Live

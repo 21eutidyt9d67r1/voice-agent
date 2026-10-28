@@ -161,6 +161,12 @@
           <p id="text-help">Start a conversation to send text. Press Enter or Send for a text-only reply; wait for the agent's response before sending another message. Mute the mic to use text only.</p>
           <p id="download-status" role="status">End a conversation to download its stored JSON log and WAV audio.</p>
         </form>
+        <section id="call-cost" class="transport-control" aria-labelledby="call-cost-title" aria-live="polite" hidden>
+          <h2 id="call-cost-title">Last call · API-returned cost</h2>
+          <dl><dt id="call-cost-total-label">API-estimated call total</dt><dd id="call-cost-total"></dd><dt>Average cost per minute</dt><dd id="call-cost-minute"></dd></dl>
+          <p id="call-cost-note"></p>
+          <details><summary>API pricing details and completeness</summary><p id="call-cost-details"></p></details>
+        </section>
         <div class="transcript-footer"><span class="dot"></span> Live conversation <span id="elapsed">00:00</span></div>
       </section>
     </div>

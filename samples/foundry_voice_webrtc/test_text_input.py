@@ -5,7 +5,7 @@ import unittest
 
 import aiohttp
 
-from server import SessionConfiguration, forward_browser, validate_client_frame
+from server import SessionConfiguration, forward_browser, forward_upstream, validate_client_frame
 
 
 def text_frame(text="Hello", **fields):
@@ -86,8 +86,63 @@ class TextInputTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.validate(frame, "webrtc")
 
+    def test_session_close_is_a_narrow_event_after_signaling_setup(self):
+        for transport in ("websocket", "webrtc"):
+            self.assertEqual(self.validate({"type": "session.close"}, transport), {"type": "session.close"})
+            with self.assertRaises(ValueError):
+                self.validate({"type": "session.close", "session": {"instructions": "override"}}, transport)
+        with self.assertRaises(ValueError):
+            validate_client_frame('{"type":"session.close"}', False, "webrtc")
+
 
 class TextRelayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_terminal_costs_are_forwarded_before_releasing_close_waiter(self):
+        from unittest.mock import AsyncMock
+        for transport in ("websocket", "webrtc"):
+            configuration = SessionConfiguration(ready=True, update={"session": {}})
+            cost = {"amount": 0.006344, "currency": "USD", "status": "complete"}
+            events = [{"type": "session.done", "estimated_cost": cost},
+                      {"type": "session.closed", "estimated_cost": cost, "usage": {"status": "complete"}}]
+
+            async def frames():
+                for event in events:
+                    yield aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, json.dumps(event), "")
+
+            upstream, browser = AsyncMock(), AsyncMock()
+            upstream.__aiter__.side_effect = frames
+
+            async def send(raw):
+                self.assertFalse(configuration.closed.is_set())
+            browser.send_str.side_effect = send
+            await forward_upstream(upstream, browser, transport, configuration)
+            self.assertTrue(configuration.closed.is_set())
+            self.assertEqual([json.loads(call.args[0]) for call in browser.send_str.call_args_list], events)
+
+    async def test_close_forwarding_waits_for_final_usage_before_finishing(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        for transport in ("websocket", "webrtc"):
+            frames = [] if transport == "websocket" else [{"type": "rtc.call.sdp.create", "sdp_offer": "v=0\r\n"}]
+            frames.append({"type": "session.close"})
+
+            async def browser():
+                for frame in frames:
+                    yield aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, json.dumps(frame), "")
+
+            configuration = SessionConfiguration(ready=True)
+            upstream = AsyncMock()
+            sent_close = asyncio.Event()
+
+            async def send(frame):
+                if frame["type"] == "session.close":
+                    sent_close.set()
+            upstream.send_json.side_effect = send
+            task = asyncio.create_task(forward_browser(browser(), upstream, transport, configuration))
+            await asyncio.wait_for(sent_close.wait(), 1)
+            self.assertFalse(task.done())
+            configuration.closed.set()
+            await asyncio.wait_for(task, 1)
+
     async def test_both_transports_forward_text_and_request_in_order(self):
         for transport in ("websocket", "webrtc"):
             frames = []

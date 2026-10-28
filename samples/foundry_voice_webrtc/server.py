@@ -15,7 +15,7 @@ import time
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import quote, urlencode, urlsplit
 
@@ -67,6 +67,7 @@ class SessionConfiguration:
     update: dict | None = None
     session_id: str | None = None
     ready: bool = False
+    closed: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def observe(self, frame, upstream):
         # The first session.updated applies the saved agent, unlike session.created.
@@ -373,7 +374,8 @@ class Settings:
             raise ValueError("Unsupported transport.")
         project = self.project_url().replace("https://", "wss://", 1)
         params = {"api-version": self.api_version,
-                  "agent_session_id": f"web-{uuid.uuid4().hex}", "store": "true"}
+                  "agent_session_id": f"web-{uuid.uuid4().hex}", "store": "true",
+                  "features": "include_estimated_cost:true"}
         # The default service transport is WebSocket; only WebRTC needs a selector.
         if transport == "webrtc":
             params["transport"] = "webrtc"
@@ -825,7 +827,7 @@ async def manage_agent(request, *, recreate=False, inspect=False):
 
 async def asset(request):
     name = request.match_info.get("file", "index.html")
-    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs", "weather.mjs", "city-scenes.mjs", "city-nature.mjs"}:
+    if name not in {"index.html", "app.js", "style.css", "favicon.svg", "pcm-audio.mjs", "pcm-capture.js", "retained-history.mjs", "call-cost.mjs", "weather.mjs", "city-scenes.mjs", "city-nature.mjs"}:
         raise web.HTTPNotFound()
     return web.FileResponse(ROOT / "public" / name)
 
@@ -850,6 +852,10 @@ def validate_client_frame(raw, started, transport="webrtc"):
         if not frame["sdp_offer"].startswith("v=0"):
             raise ValueError("Invalid SDP offer.")
         return {"type": kind, "sdp_offer": frame["sdp_offer"]}
+    if kind == "session.close":
+        if set(frame) != {"type"}:
+            raise ValueError("Session close accepts no configuration overrides.")
+        return {"type": kind}
     if kind == "conversation.item.create":
         item = frame.get("item")
         if not isinstance(item, dict) or item.get("type") != "message" or item.get("role") != "user":
@@ -898,6 +904,13 @@ async def forward_browser(browser, upstream, transport, configuration):
             if not configuration.ready and frame["type"] not in {"rtc.call.sdp.create", "conversation.item.retrieve"}:
                 raise SessionConfigurationError("Wait for the retained-history configuration acknowledgment before sending input.")
             await upstream.send_json(frame)
+            if frame["type"] == "session.close":
+                try:
+                    async with asyncio.timeout(20):
+                        await configuration.closed.wait()
+                except TimeoutError:
+                    raise SessionConfigurationError("Azure did not confirm final session usage and cost before the close timeout.") from None
+                return
             if frame["type"] == "rtc.call.sdp.create":
                 started = True
         elif message.type == aiohttp.WSMsgType.BINARY:
@@ -921,6 +934,9 @@ async def forward_upstream(upstream, browser, transport, configuration, on_conve
                     if acknowledged:
                         deadline.reschedule(None)
                         await browser.send_json({"type": "bridge.ready"})
+                    if frame.get("type") == "session.closed":
+                        configuration.closed.set()
+                        return
     except TimeoutError:
         raise SessionConfigurationError("Timed out waiting for Azure to acknowledge retained-history session configuration.") from None
 

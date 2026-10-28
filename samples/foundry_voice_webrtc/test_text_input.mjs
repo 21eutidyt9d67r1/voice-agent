@@ -4,8 +4,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 import { RetainedHistory } from './public/retained-history.mjs';
+import { returnedCallCost } from './public/call-cost.mjs';
 
 const source = await readFile(new URL('./public/app.js', import.meta.url), 'utf8');
+const sessionCost = {amount:0.006344, currency:'USD', status:'complete',
+  price_version:'azure-retail-prices-eastus2-2026-06-01', unpriced_components:[]};
 
 async function setup(transport, overrides = {}) {
   const elements = new Map();
@@ -41,6 +44,7 @@ async function setup(transport, overrides = {}) {
     clearTimeout() {}, clearInterval() {}, setInterval: () => 1, setTimeout: () => 1, AbortController, AbortSignal,
     validateAudioSession() {},
     RetainedHistory,
+    returnedCallCost,
     session,
     ...overrides,
   };
@@ -54,6 +58,105 @@ async function setup(transport, overrides = {}) {
   })()`, context).then(api => context.api = api);
   return { ...context.api, element, session, sent, created };
 }
+
+for (const transport of ['websocket', 'webrtc']) {
+  test(`${transport}: graceful close displays API cost exactly once and excludes setup/close wait`, async () => {
+    let now = 1000;
+    const ui = await setup(transport, {
+      Date: {now:()=>now},
+      fetch: async url => ({ok:true, json:async()=>url === '/api/config' ?
+        {configured:true} : {exists:true, model:'gpt-5.4', version:'1'}}),
+    });
+    now = 11000;
+    ui.session.configured = true;
+    ui.markReady(ui.session);
+    assert.equal(ui.element('call-cost').hidden, true);
+    now = 41000;
+    await ui.handleEvent(ui.session, {type:'response.done', response:{estimated_cost:{...sessionCost, amount:5}}});
+    await ui.element('stop').onclick();
+    assert.equal(ui.sent.at(-1).type, 'session.close');
+    assert.equal(ui.element('call-cost').hidden, true);
+    await ui.element('stop').onclick();
+    assert.equal(ui.sent.filter(frame=>frame.type==='session.close').length, 1);
+    now = 45000;
+    await ui.handleEvent(ui.session, {type:'session.done', estimated_cost:sessionCost});
+    await ui.handleEvent(ui.session, {type:'session.closed', estimated_cost:sessionCost});
+    assert.equal(ui.element('call-cost').hidden, false);
+    assert.equal(ui.element('call-cost-total').textContent, '$0.006344 USD');
+    assert.equal(ui.element('call-cost-minute').textContent, '$0.012688 USD/min');
+    assert.match(ui.element('call-cost-note').textContent, /30.0 connected seconds/);
+    assert.match(ui.element('call-cost-note').textContent, /Complete API estimate/);
+    assert.match(ui.element('call-cost-details').textContent, /azure-retail-prices-eastus2-2026-06-01/);
+    assert.match(ui.element('call-cost-details').textContent, /No assumed token counts/);
+    const total = ui.element('call-cost-total').textContent;
+    now = 90000;
+    ui.stop();
+    assert.equal(ui.element('call-cost-total').textContent, total);
+  });
+}
+
+test('Live cost excludes close-acknowledgment wait and retains final usage display', async () => {
+  let now = 1000;
+  const ui = await setup('websocket', {
+    Date: {now:()=>now},
+    fetch: async url => ({ok:true, json:async()=>url === '/api/config' ?
+      {configured:true} :
+      {exists:true, model:'gpt-live-1-test', modelChoice:'gpt-live-1', version:'1'}}),
+  });
+  ui.session.live = true;
+  ui.session.configured = true;
+  ui.markReady(ui.session);
+  now = 61000;
+  await ui.element('stop').onclick();
+  now = 70000;
+  await ui.handleEvent(ui.session, {type:'session.closed', usage:{seconds:62}, estimated_cost:sessionCost});
+  assert.equal(ui.element('call-cost-total').textContent, '$0.006344 USD');
+  assert.match(ui.element('call-cost-note').textContent, /60.0 connected seconds/);
+  assert.match(ui.element('hint').textContent, /62 seconds/);
+});
+
+test('disconnects and duration-only Live usage show unavailable, not assumed prices', async () => {
+  for (const model of ['azure-realtime-flash-2026-10-14', 'gpt-live-1']) {
+    let now = 1000;
+    const ui = await setup('websocket', {
+      Date: {now:()=>now},
+      fetch: async url => ({ok:true, json:async()=>url === '/api/config' ?
+        {configured:true} : {exists:true, model, version:'1'}}),
+    });
+    ui.session.configured = true;
+    ui.markReady(ui.session);
+    now = 61000;
+    if (model === 'gpt-live-1') {
+      ui.session.live = true;
+      await ui.handleEvent(ui.session, {type:'session.closed', usage:{seconds:60}});
+    } else {
+      ui.stop();
+    }
+    assert.equal(ui.element('call-cost-total').textContent, 'Unavailable');
+    assert.equal(ui.element('call-cost-minute').textContent, 'Unavailable');
+    assert.match(ui.element('call-cost-note').textContent, /did not return a finalized session cost/);
+  }
+});
+
+test('partial API costs are labeled as subtotals instead of complete totals', async () => {
+  const ui = await setup('websocket');
+  ui.session.configured = true;
+  ui.markReady(ui.session);
+  ui.session.beganAt = Date.now() - 60000;
+  await ui.handleEvent(ui.session, {type:'session.closed',
+    estimated_cost:{...sessionCost, status:'partial', unpriced_components:['byom_model']}});
+  assert.equal(ui.element('call-cost-total-label').textContent, 'Priced subtotal (partial)');
+  assert.equal(ui.element('call-cost-total').textContent, '$0.006344 USD');
+  assert.match(ui.element('call-cost-minute').textContent, /\(partial\)/);
+  assert.match(ui.element('call-cost-note').textContent, /Partial/);
+  assert.match(ui.element('call-cost-details').textContent, /byom_model/);
+});
+
+test('failed connection without readiness does not show a call-cost estimate', async () => {
+  const ui = await setup('websocket');
+  ui.stop();
+  assert.equal(ui.element('call-cost').hidden, true);
+});
 
 test('Agent creation UI reports creation and enables required personalization', async () => {
   const requests = [];

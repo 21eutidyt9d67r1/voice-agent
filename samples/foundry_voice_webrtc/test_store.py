@@ -19,6 +19,7 @@ class StoreTests(unittest.TestCase):
             with self.subTest(transport=transport):
                 query = parse_qs(urlsplit(cfg.voice_url(transport)).query)
                 self.assertEqual(query["store"], ["true"])
+                self.assertEqual(query["features"], ["include_estimated_cost:true"])
                 self.assertEqual(query.get("transport"),
                                  ["webrtc"] if transport == "webrtc" else None)
 
