@@ -52,8 +52,11 @@ def truncation_update(session):
         include = []
     if not isinstance(include, list) or any(not isinstance(value, str) for value in include):
         raise SessionConfigurationError("Azure returned an invalid session include list.")
-    include = list(dict.fromkeys([*include, TRUNCATED_ITEM_INCLUDE]))
-    vad = {**vad, "auto_truncate": True, "interrupt_response": True}
+    auto_truncate = session.get("model") != FLASH_MODEL
+    include = list(dict.fromkeys(
+        [*include, TRUNCATED_ITEM_INCLUDE] if auto_truncate else
+        [value for value in include if value != TRUNCATED_ITEM_INCLUDE]))
+    vad = {**vad, "auto_truncate": auto_truncate, "interrupt_response": True}
     settings = {"include": include}
     if stable:
         settings.update({"type": "realtime", "audio": {"input": {"turn_detection": vad}}})
@@ -81,15 +84,18 @@ class SessionConfiguration:
             return False
         expected = self.update["session"]
         stable = "audio" in expected
+        expected_vad = expected["audio"]["input"]["turn_detection"] if stable else expected["turn_detection"]
         vad = ((session.get("audio") or {}).get("input") or {}).get("turn_detection") if stable else session.get("turn_detection")
         include = session.get("include", [])
         if (session.get("id") != self.session_id or not isinstance(vad, dict)
-                or vad.get("auto_truncate") is not True or vad.get("interrupt_response") is not True
+                or vad.get("auto_truncate") is not expected_vad["auto_truncate"]
+                or vad.get("interrupt_response") is not True
                 or not isinstance(include, list)
+                or (not expected_vad["auto_truncate"] and TRUNCATED_ITEM_INCLUDE in include)
                 or any(value not in include for value in expected["include"])):
             self.ready = False
             raise SessionConfigurationError(
-                "Azure did not acknowledge auto_truncate, interrupt_response and the retained-item include selector. "
+                "Azure did not acknowledge the requested auto_truncate, interrupt_response and retained-item include settings. "
                 "Input remains disabled; check support for this agent endpoint/API version.")
         first_ack = not self.ready
         self.ready = True
@@ -586,6 +592,8 @@ def model_definition(definition, model, transcription=None):
         updated.pop("greeting", None)
     audio = updated.setdefault("audio", {})
     input_audio, output = audio.setdefault("input", {}), audio.setdefault("output", {})
+    if model == FLASH_MODEL and isinstance(input_audio.get("turn_detection"), dict):
+        input_audio["turn_detection"]["auto_truncate"] = False
     if transcription is not None:
         settings = input_audio.get("transcription")
         input_audio["transcription"] = {**(settings if isinstance(settings, dict) else {}), "model": transcription}
