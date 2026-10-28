@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import yaml
 from aiohttp.test_utils import TestClient, TestServer
 
-from server import (ACTIVE, DEFAULT_TRANSCRIPTION_MODEL, LIVE_MODEL, MODELS, TRANSCRIPTION_MODELS, Settings, create_app,
+from server import (ACTIVE, DEFAULT_TRANSCRIPTION_MODEL, FLASH_MODEL, LIVE_MODEL, MODELS, TRANSCRIPTION_MODELS, Settings, create_app,
                     model_definition, redact_settings, transcription_model)
 from test_agent_creation import Client, Response
 
@@ -43,7 +43,10 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
         for model in MODELS:
             result = model_definition(original, model)
             self.assertEqual(result["instructions"], original["instructions"])
-            self.assertEqual(result["greeting"], original["greeting"])
+            if model == FLASH_MODEL:
+                self.assertNotIn("greeting", result)
+            else:
+                self.assertEqual(result["greeting"], original["greeting"])
             self.assertEqual(result["tools"], original["tools"])
             self.assertEqual(result["audio"]["input"]["noise_reduction"], original["audio"]["input"]["noise_reduction"])
             self.assertEqual(transcription_model(result), DEFAULT_TRANSCRIPTION_MODEL)
@@ -88,6 +91,59 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
                 restored = model_definition(native, model)
                 self.assertEqual(restored["audio"]["output"]["voice"], "en-US-Tyler:DragonHDLatestNeural")
                 self.assertEqual(restored["audio"]["output"]["voice_type"], "azure-standard")
+
+    def test_model_labels_match_their_api_ids(self):
+        import re
+        html = Path(__file__).with_name("public").joinpath("index.html").read_text(encoding="utf-8")
+        select = re.search(r'<select id="agent-model-choice".*?</select>', html, re.S).group()
+        labels = dict(re.findall(r'<option value="([^"]+)">([^<]+)</option>', select))
+        self.assertEqual(labels, {model: model for model in MODELS | {LIVE_MODEL}})
+
+    def test_flash_disables_greeting_even_when_the_model_is_already_selected(self):
+        original = self.definition()
+        original["model"] = FLASH_MODEL
+        snapshot = copy.deepcopy(original)
+        changed = model_definition(original, FLASH_MODEL, "azure-speech")
+        self.assertNotIn("greeting", changed)
+        self.assertEqual(transcription_model(changed), "azure-speech")
+        self.assertEqual(original, snapshot)
+        self.assertEqual(model_definition(changed, FLASH_MODEL), changed)
+
+    async def test_flash_greeting_is_preserved_in_metadata_and_restored_when_switching_back(self):
+        cfg = Settings("https://example.services.ai.azure.com/api/projects/demo", "demo-agent")
+        original = self.agent()
+        original["versions"]["latest"]["definition"]["greeting"]["prompt"] = "A custom greeting."
+        flash = copy.deepcopy(original)
+        latest = flash["versions"]["latest"]
+        latest["version"] = "2"
+        latest["metadata"]["flash_greeting"] = json.dumps(latest["definition"]["greeting"])
+        latest["definition"] = model_definition(latest["definition"], FLASH_MODEL)
+        restored = copy.deepcopy(original)
+        restored["versions"]["latest"]["version"] = "3"
+        for before, after, target in (
+            (original, flash, FLASH_MODEL),
+            (flash, flash, FLASH_MODEL),
+            (flash, restored, "gpt-5.4"),
+        ):
+            with self.subTest(target=target, version=before["versions"]["latest"]["version"]):
+                changed = before != after
+                service = ServiceClient([Response(200, before), Response(200, after)],
+                                        ([Response(201, {"version": after["versions"]["latest"]["version"]})]
+                                         if changed else []) + [Response(204)])
+                async with TestClient(TestServer(create_app(cfg, AsyncMock()))) as client:
+                    with patch("server.aiohttp.ClientSession", return_value=service):
+                        response = await client.post("/api/agent/model",
+                            headers={"Origin": str(client.make_url("")).rstrip("/")},
+                            json={"model": target, "version": before["versions"]["latest"]["version"]})
+                        result = await response.json()
+                self.assertEqual(response.status, 200, result)
+                if changed:
+                    published = service.writes[0][1]["json"]
+                    self.assertEqual(published["definition"], after["versions"]["latest"]["definition"])
+                    self.assertEqual(published["metadata"], after["versions"]["latest"]["metadata"])
+                else:
+                    self.assertFalse(any("/versions" in url for url, _ in service.writes))
+                self.assertEqual(service.removals, [])
 
     async def test_standard_voice_models_can_be_saved_without_deleting_previous_versions(self):
         cfg = Settings("https://example.services.ai.azure.com/api/projects/demo", "demo-agent")

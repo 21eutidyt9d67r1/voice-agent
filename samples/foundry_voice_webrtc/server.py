@@ -103,7 +103,8 @@ HD_VOICES = {f"en-US-{name}:DragonHDLatestNeural" for name in ("Tessa", "Tyler",
     "en-IN-Diya:DragonHDLatestNeural", "zh-CN-Xiaoqi:DragonHDFlashLatestNeural", "zh-CN-Xiaoke:DragonHDFlashLatestNeural"}
 MAI_FLASH_VOICES = {"en-US-Harper:MAI-Voice-2.1-Flash", "en-GB-Harry:MAI-Voice-2.1-Flash"}
 NATIVE_VOICES = {"ava", "andrew", "emma", "clara", "liam", "natasha", "rayn", "alvaro", "dalia", "jorge"}
-MODELS = {"gpt-realtime-2.1", "gpt-realtime-2.1-mini", "azure-realtime", "azure-realtime-flash-2026-10-14", "gpt-5.4"}
+FLASH_MODEL = "azure-realtime-flash-2026-10-14"
+MODELS = {"gpt-realtime-2.1", "gpt-realtime-2.1-mini", "azure-realtime", FLASH_MODEL, "gpt-5.4"}
 LIVE_MODEL = "gpt-live-1"
 TRANSCRIPTION_MODELS = {
     "azure-speech", "azure-speech-streaming", "azure-llm-speech",
@@ -581,6 +582,8 @@ def model_definition(definition, model, transcription=None):
         raise AgentPreparationError("Choose one of the supported transcription models.")
     updated = copy.deepcopy(definition)
     updated["model_type"], updated["model"] = "managed", model
+    if model == FLASH_MODEL:
+        updated.pop("greeting", None)
     audio = updated.setdefault("audio", {})
     input_audio, output = audio.setdefault("input", {}), audio.setdefault("output", {})
     if transcription is not None:
@@ -696,6 +699,11 @@ async def change_agent_model(request):
                         if not isinstance(source, dict) or source.get("sub_protocol") == "live":
                             raise AgentPreparationError("The original realtime definition could not be verified.")
                         metadata.pop("realtime_source_version", None)
+                    if body["model"] == FLASH_MODEL and "greeting" in source:
+                        metadata.setdefault("flash_greeting", json.dumps(source["greeting"]))
+                    elif body["model"] != FLASH_MODEL and "flash_greeting" in metadata:
+                        source = copy.deepcopy(source)
+                        source["greeting"] = json.loads(metadata.pop("flash_greeting"))
                     definition = model_definition(source, body["model"], body.get("transcriptionModel"))
                 if definition != latest["definition"]:
                     url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions"
