@@ -5,20 +5,22 @@ Agent. It creates an Agent, creates or reuses a `SipInbound` project connection,
 binds it, retrieves the SIP address, reads call records, and removes the binding
 after testing.
 
-The sample supports Responses delegation and delegation to an existing Foundry
-managed Agent. SIP signaling and media are handled by the deployed SIP Proxy,
-Media Gateway, and Telephony service; no local media server is required.
+The sample uses **direct model Responses delegation**: GPT Live delegates to a
+Responses model deployment, not to another Foundry Agent. SIP signaling and media
+are handled by the deployed SIP Proxy, Media Gateway, and Telephony service;
+no local media server is required.
 
 ```text
 SIP client/PBX <-- SIP + negotiated media --> SIP Proxy / Media Gateway
                                             <-- Runtime Attach --> Telephony
                                                                    <-- native Live --> GPT Live
-                                                                                       --> Responses backend
+                                                                                       --> Responses model deployment
 ```
 
-Telephone calls require `delegation.type=responses` or `foundry_managed_agent`.
-Client-owned delegation is not supported by this sample. The service handles
-media conversion, native Live session readiness, and backend delegation.
+The Agent definition always uses `delegation.type=responses`. There is no backend
+Agent to create or version, and this sample has no managed-Agent or client-owned
+delegation mode. The service handles media conversion, native Live session
+readiness, and delegation to the Responses model.
 
 ## Prerequisites
 
@@ -26,8 +28,7 @@ media conversion, native Live session readiness, and backend delegation.
   and manage bindings in the specified project.
 - A target region/deployment with SIP ingress, GPT Live, and Live telephony enabled.
   Verify runtime availability and SIP/RTP connectivity separately from resource creation.
-- A GPT Live deployment and either a Responses deployment or an existing
-  same-project prompt agent that supports managed Live delegation.
+- A GPT Live deployment and a Responses model deployment available to the project.
 - A **same-project `SipInbound` Connection**, not `SipOutbound`, ACS, or Twilio.
   Reuse one, or create it with the `connection` command below. That command needs
   ARM connection read permission and, for creation, write permission on the project;
@@ -84,7 +85,7 @@ port 443. The sample validates this Azure public-cloud Foundry host before
 acquiring credentials or sending a token. Custom hosts, local endpoints, and
 other cloud domains are not supported; HTTP redirects are disabled.
 On Linux/macOS use `.venv/bin/python` and `cp .env.example .env`.
-Use a new Agent name for this sample. No existing Agent or backend definition is updated.
+Use a new Agent name for this sample. No existing Agent definition or model deployment is updated.
 
 ## 2. Preview and create the Agent
 
@@ -93,33 +94,27 @@ Use a new Agent name for this sample. No existing Agent or backend definition is
 .venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-demo
 ```
 
-The default uses `delegation.type=responses`. The frontend handles natural speech,
-greetings, and interruptions; substantive questions go to the Responses backend.
+The frontend handles natural speech, greetings, and interruptions; substantive
+questions go to the Responses model. `GPT_LIVE_MODEL_DEPLOYMENT` selects the
+frontend deployment. `RESPONSES_MODEL_DEPLOYMENT` (or `--responses-model`) selects
+the backend model deployment directly, not an Agent name. The definition contains:
+
+```json
+{
+  "delegation": {
+    "type": "responses",
+    "responses": {
+      "model": "<responses-deployment>",
+      "instructions": "Help a telephone assistant answer the caller's question. Return a concise, speech-friendly answer."
+    }
+  }
+}
+```
+
 The sample uses `store=false` and declares no tools. Recording, transfer, SMS,
 DTMF, and model-initiated hangup are outside its scope.
 
-To use an **existing** managed prompt agent instead:
-
-```powershell
-.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-managed-demo --backend-agent my-specialist --backend-version 1 --dry-run
-.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-managed-demo --backend-agent my-specialist --backend-version 1
-```
-
-The backend must already satisfy the managed delegation contract: its final
-assistant text uses `[commentary]` for speech and optional `[thinking]` for
-background context. Configure its instructions to return tagged plain text
-without a code fence, for example:
-
-```text
-[thinking] The caller wants a brief explanation of SIP.
-[commentary] SIP sets up and manages voice calls over an IP network.
-```
-
-The sample references a fixed backend version without changing its definition.
-Use a tool-free backend for the basic audio test. Tool-dependent backends require
-configured executors and authorization.
-
-Both dry-run commands can also run with just Python and explicit model arguments,
+The dry-run command can also run with just Python and explicit model arguments,
 without Azure credentials, dependencies, or network access:
 
 ```powershell
@@ -289,9 +284,9 @@ Hang up first. Delete only the binding you created:
 This reads the current ETag and sends it as `If-Match`; a missing ETag or a
 concurrent-update `412` stops cleanup rather than using `*` or blind retries.
 Deleting a binding removes routing for new calls; it is not a hangup operation.
-The Agent, backend, and Connection remain intact, including a Connection created
-by the `connection` command. Remove the dedicated test Agent
-through Agent management when no longer needed. Retain shared backend Agents
+The Agent, model deployments, and Connection remain intact, including a Connection
+created by the `connection` command. Remove the dedicated test Agent
+through Agent management when no longer needed. Retain shared model deployments
 and Connections used by other applications.
 
 ## Offline validation
@@ -301,8 +296,8 @@ python -m unittest discover -s tests -v
 ```
 
 Tests use mock HTTP responses and credentials without calling live services.
-They cover definitions, both delegation modes, connection reuse and creation,
-digest/IP ACL validation, ARM token isolation, secret-free output, exact binding
+They cover direct model Responses delegation, required deployment configuration,
+connection reuse and creation, digest/IP ACL validation, ARM token isolation, secret-free output, exact binding
 fields, URL escaping, ETag cleanup, and failure propagation.
 They do **not** validate real SIP/TLS/RTP, model behavior, audio quality, or deployed
 feature gates. Those require the manual two-way call above.
@@ -310,5 +305,4 @@ feature gates. Those require the manual two-way call above.
 ## Related resources
 
 - [Voice Agent samples](../README.md)
-- [GPT Live microphone sample](../gpt_live/README.md)
-- [Voice subagent sample](../subagent/voice_subagent_prompt_basic/README.md)
+- [GPT Live Responses delegation microphone sample](../gpt_live/python/README.md)

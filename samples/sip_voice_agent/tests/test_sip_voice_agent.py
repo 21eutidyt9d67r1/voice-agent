@@ -35,31 +35,41 @@ class SampleTests(unittest.TestCase):
             "format": {"type": "audio/pcm", "rate": 24000}, "output": {"voice": "marin"},
         })
         self.assertFalse(definition["store"])
-        self.assertEqual(definition["delegation"]["type"], "responses")
-        self.assertEqual(definition["delegation"]["responses"]["model"], "responses-deployment")
+        self.assertEqual(definition["delegation"], {
+            "type": "responses",
+            "responses": {"model": "responses-deployment", "instructions": sample.BACKEND_INSTRUCTIONS},
+        })
         for key in ("live_config", "greeting", "tools", "conversation_engine", "turn_detection"):
             self.assertNotIn(key, definition)
         self.assertIn("Delegate to the backend", definition["instructions"])
 
-    def test_managed_definition_pins_existing_backend(self):
-        definition = sample.voice_definition("live", "marin", None, "specialist", "7")
-        self.assertEqual(definition["delegation"], {
-            "type": "foundry_managed_agent", "agent_name": "specialist", "agent_version": "7",
-        })
-        # Environment Responses defaults must not leak into managed delegation.
-        self.assertEqual(
-            definition,
-            sample.voice_definition("live", "marin", "unused-env-model", "specialist", "7"),
-        )
+    def test_responses_deployment_uses_environment_or_explicit_cli_override(self):
+        environment = {"GPT_LIVE_MODEL_DEPLOYMENT": "live", "RESPONSES_MODEL_DEPLOYMENT": "env-responses"}
+        for options, expected in (([], "env-responses"), (["--responses-model", "cli-responses"], "cli-responses")):
+            with self.subTest(options=options), patch.dict(sample.os.environ, environment, clear=True):
+                args = sample.build_parser().parse_args(["create", "--agent-name", "demo", "--dry-run", *options])
+                definition = sample.execute(args, None)["body"]["definition"]
+                self.assertEqual(definition["delegation"]["responses"]["model"], expected)
+                self.assertEqual(definition["delegation"]["type"], "responses")
 
-    def test_missing_deployments_or_backend_version_fail_before_http(self):
+    def test_missing_deployments_or_voice_fail_before_http(self):
         for values in (
             ("", "marin", "responses"), ("live", "", "responses"),
-            ("live", "marin", None), ("live", "marin", None, "specialist", None),
-            ("live", "marin", "responses", None, "7"),
+            ("live", "marin", None), ("live", "marin", ""), ("live", "marin", " "),
         ):
-            with self.subTest(values=values), self.assertRaises(ValueError):
-                sample.voice_definition(*values)
+            with self.subTest(values=values):
+                args = self.args("create", "--agent-name", "demo")
+                args.live_model, args.voice, args.responses_model = values
+                send = Mock(side_effect=AssertionError("No HTTP before configuration is valid"))
+                with self.assertRaises(ValueError):
+                    sample.execute(args, send)
+                send.assert_not_called()
+
+    def test_create_rejects_managed_backend_options(self):
+        for option in ("--backend-agent", "--backend-version"):
+            with self.subTest(option=option), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+                self.args("create", "--agent-name", "demo", option, "unused")
+            self.assertEqual(error.exception.code, 2)
 
     def test_create_dry_run_never_calls_http(self):
         send = Mock(side_effect=AssertionError("HTTP must not be called"))
@@ -82,15 +92,19 @@ class SampleTests(unittest.TestCase):
             sample.main()
         self.assertEqual(json.loads(output.getvalue())["method"], "POST")
 
-    def test_create_managed_never_writes_backend_agent(self):
+    def test_create_posts_only_voice_agent_with_direct_model_delegation(self):
         send = Mock(return_value=response({"name": "demo"}))
         sample.execute(self.args(
             "create", "--agent-name", "demo", "--live-model", "live",
-            "--backend-agent", "existing-backend", "--backend-version", "3",
+            "--responses-model", "responses-deployment",
         ), send)
         self.assertEqual(send.call_count, 1)
         self.assertEqual(send.call_args.args, ("POST", "/agents"))
         self.assertEqual(send.call_args.kwargs["json"]["name"], "demo")
+        self.assertEqual(send.call_args.kwargs["json"]["definition"]["delegation"], {
+            "type": "responses",
+            "responses": {"model": "responses-deployment", "instructions": sample.BACKEND_INSTRUCTIONS},
+        })
 
     def test_binding_body_has_only_public_inbound_fields(self):
         self.assertEqual(sample.binding_body(" inbound ", []), {

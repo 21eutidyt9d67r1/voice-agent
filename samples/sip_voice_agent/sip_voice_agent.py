@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a native GPT Live agent, prepare a SIP inbound connection, and bind it."""
+"""Create a GPT Live agent with model Responses delegation and bind a SIP connection."""
 
 from __future__ import annotations
 
@@ -60,26 +60,7 @@ def project_endpoint(value: str | None) -> str:
     return endpoint
 
 
-def voice_definition(
-    model: str, voice: str, responses_model: str | None,
-    backend_agent: str | None = None, backend_version: str | None = None,
-) -> dict:
-    if backend_agent:
-        delegation = {
-            "type": "foundry_managed_agent",
-            "agent_name": required(backend_agent, "backend agent"),
-            "agent_version": required(backend_version, "--backend-version"),
-        }
-    else:
-        if backend_version:
-            raise ValueError("--backend-version requires --backend-agent")
-        delegation = {
-            "type": "responses",
-            "responses": {
-                "model": required(responses_model, "RESPONSES_MODEL_DEPLOYMENT / --responses-model"),
-                "instructions": BACKEND_INSTRUCTIONS,
-            },
-        }
+def voice_definition(model: str, voice: str, responses_model: str | None) -> dict:
     return {
         "kind": "voice", "sub_protocol": "live", "model_type": "self_deployed",
         "model": required(model, "GPT_LIVE_MODEL_DEPLOYMENT / --live-model"),
@@ -89,7 +70,13 @@ def voice_definition(
             "format": {"type": "audio/pcm", "rate": 24000},
             "output": {"voice": required(voice, "--voice")},
         },
-        "delegation": delegation,
+        "delegation": {
+            "type": "responses",
+            "responses": {
+                "model": required(responses_model, "RESPONSES_MODEL_DEPLOYMENT / --responses-model"),
+                "instructions": BACKEND_INSTRUCTIONS,
+            },
+        },
     }
 
 
@@ -220,10 +207,7 @@ def execute(args, send):
     if args.command == "create":
         body = {
             "name": required(args.agent_name, "--agent-name"),
-            "definition": voice_definition(
-                args.live_model, args.voice, args.responses_model,
-                args.backend_agent, args.backend_version,
-            ),
+            "definition": voice_definition(args.live_model, args.voice, args.responses_model),
         }
         if args.dry_run:
             return {"method": "POST", "path": "/agents", "body": body}
@@ -273,14 +257,12 @@ def build_parser() -> argparse.ArgumentParser:
     connection.add_argument("--auth-type", choices=("digest", "ip_acl"), default=os.getenv("SIP_AUTH_TYPE"),
                             help="New connection mode (default: digest); if set, must match an existing connection")
     connection.add_argument("--dry-run", action="store_true", help="Preview without credentials, secrets, or network calls")
-    create = commands.add_parser("create", help="Create a new native GPT Live agent")
+    create = commands.add_parser("create", help="Create a GPT Live agent with model Responses delegation")
     create.add_argument("--agent-name", required=True)
     create.add_argument("--live-model", default=os.getenv("GPT_LIVE_MODEL_DEPLOYMENT"))
     create.add_argument("--voice", default="marin")
-    backend = create.add_mutually_exclusive_group()
-    backend.add_argument("--responses-model", default=os.getenv("RESPONSES_MODEL_DEPLOYMENT"))
-    backend.add_argument("--backend-agent", help="Existing same-project prompt agent; never modified")
-    create.add_argument("--backend-version", help="Pin the existing backend agent version")
+    create.add_argument("--responses-model", default=os.getenv("RESPONSES_MODEL_DEPLOYMENT"),
+                        help="Model deployment used directly by the Responses backend (not an Agent name)")
     create.add_argument("--dry-run", action="store_true", help="Print JSON without authentication or network calls")
     bind = commands.add_parser("bind", help="Create a SIP binding to an existing connection")
     bind.add_argument("--agent-name", required=True)
