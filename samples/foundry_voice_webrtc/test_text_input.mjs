@@ -60,6 +60,54 @@ async function setup(transport, overrides = {}) {
 }
 
 for (const transport of ['websocket', 'webrtc']) {
+  test(`${transport}: failed responses display the Azure session ID and retain it after stopping`, async () => {
+    const ui = await setup(transport);
+    await ui.handleEvent(ui.session, {type:'session.created', session:{id:'sess_failure'}});
+    await ui.handleEvent(ui.session, {type:'response.done', response:{
+      status:'failed', status_details:{error:{message:'Unknown error'}},
+    }});
+    assert.equal(ui.element('error').textContent, 'Unknown error');
+    assert.equal(ui.element('session-reference').textContent, 'Session ID: sess_failure');
+    assert.equal(ui.element('session-reference').hidden, false);
+    ui.stop();
+    assert.equal(ui.element('session-reference').textContent, 'Session ID: sess_failure');
+    ui.stop();
+    assert.equal(ui.element('session-reference').textContent, 'Session ID: sess_failure');
+    await ui.start();
+    assert.doesNotMatch(ui.element('session-reference').textContent, /sess_failure/);
+  });
+
+  test(`${transport}: socket errors and disconnects preserve session diagnostics`, async () => {
+    for (const callback of ['onerror', 'onclose']) {
+      let socket;
+      class Socket {
+        static OPEN = 1;
+        constructor() { this.readyState = 1; socket = this; }
+        close() {}
+      }
+      const ui = await setup(transport, {WebSocket:Socket, location:{protocol:'https:',host:'example.test'}});
+      ui.openSocket(ui.session);
+      await ui.handleEvent(ui.session, {type:'session.updated', session:{id:'sess_disconnected'}});
+      socket[callback]();
+      assert.equal(ui.element('session-reference').textContent, 'Session ID: sess_disconnected');
+      assert.equal(ui.element('session-reference').hidden, false);
+    }
+  });
+
+  test(`${transport}: failure before Azure startup reports no session ID rather than inventing one`, async () => {
+    let socket;
+    class Socket {
+      static OPEN = 1;
+      constructor() { this.readyState = 1; socket = this; }
+      close() {}
+    }
+    const ui = await setup(transport, {WebSocket:Socket, location:{protocol:'https:',host:'example.test'}});
+    ui.openSocket(ui.session);
+    socket.onerror();
+    assert.equal(ui.element('session-reference').textContent, 'Session ID: unavailable (Azure did not return one).');
+    assert.equal(ui.element('session-reference').hidden, false);
+  });
+
   test(`${transport}: Flash warns that automatic truncation and authoritative retained history are disabled`, async () => {
     const ui = await setup(transport, {
       fetch: async url => ({ok:true, json:async()=>url === '/api/config' ?
@@ -107,6 +155,32 @@ for (const transport of ['websocket', 'webrtc']) {
     assert.equal(ui.element('call-cost-total').textContent, total);
   });
 }
+
+test('GPT Live retains its session ID after backend errors and session closure', async () => {
+  const ui = await setup('websocket');
+  ui.session.live = true;
+  await ui.handleEvent(ui.session, {type:'session.started', session_id:'live_session'});
+  await ui.handleEvent(ui.session, {type:'response.event', event:{type:'response.failed'}});
+  assert.equal(ui.element('session-reference').textContent, 'Session ID: live_session');
+  assert.match(ui.element('error').textContent, /reasoning backend failed/);
+  await ui.handleEvent(ui.session, {type:'session.closed', usage:{seconds:0}});
+  assert.equal(ui.element('session-reference').textContent, 'Session ID: live_session');
+  assert.equal(ui.element('session-reference').hidden, false);
+});
+
+test('Agent preparation failure clears the previous session ID and reports it as unavailable', async () => {
+  const ui = await setup('websocket', {
+    fetch: async url => ({ok:url !== '/api/agent/prepare', json:async()=>url === '/api/config' ?
+      {configured:true} : url === '/api/agent/prepare' ? {error:'Agent preparation failed'} :
+      {exists:true, model:'gpt-5.4', version:'1'}}),
+  });
+  await ui.handleEvent(ui.session, {type:'session.created', session:{id:'sess_previous'}});
+  ui.stop();
+  await ui.start();
+  assert.equal(ui.element('error').textContent, 'Agent preparation failed');
+  assert.equal(ui.element('session-reference').textContent, 'Session ID: unavailable (Azure did not return one).');
+  assert.equal(ui.element('session-reference').hidden, false);
+});
 
 test('Live cost excludes close-acknowledgment wait and retains final usage display', async () => {
   let now = 1000;

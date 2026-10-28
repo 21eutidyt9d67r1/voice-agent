@@ -243,7 +243,15 @@ function sendText(event) {
   $('text-input').value = '';
   updateTextInput();
 }
-function showError(message) { $('error').textContent = message; $('error').hidden = false; }
+function showSessionReference(session) {
+  $('session-reference').textContent = session.sessionId ?
+    `Session ID: ${session.sessionId}` : 'Session ID: unavailable (Azure did not return one).';
+  $('session-reference').hidden = false;
+}
+function showError(message) {
+  $('error').textContent = message; $('error').hidden = false;
+  if (call) showSessionReference(call);
+}
 function state(title, hint, badge) {
   $('status').textContent = title; $('hint').textContent = hint; $('connection').textContent = badge;
 }
@@ -284,6 +292,7 @@ function createHistory(session) {
 function stop(title = 'Conversation ended', hint = 'Start again whenever you’re ready.') {
   const old = call; call = null;
   if (old) {
+    showSessionReference(old);
     if (old.beganAt !== undefined) showCallCost(old);
     clearTimeout(old.timeout); clearTimeout(old.disconnectTimer); clearTimeout(old.closeTimer); clearInterval(old.clock);
     old.history?.dispose();
@@ -421,6 +430,13 @@ async function connectWebRtc(session) {
 async function handleEvent(session, event) {
   if (call !== session) return;
   const type = event.type || '';
+  if (type.startsWith('session.')) {
+    const id = event.session?.id ?? event.session_id;
+    if (typeof id === 'string' && id.trim()) {
+      session.sessionId = id;
+      showSessionReference(session);
+    }
+  }
   if (type === 'session.done' || type === 'session.closed') {
     if (event.estimated_cost !== undefined) session.returnedCost = event.estimated_cost;
     session.endedAt ??= Date.now();
@@ -521,9 +537,12 @@ async function handleEvent(session, event) {
 }
 async function start() {
   if (call || preparingAgent || !config?.configured) return;
+  $('session-reference').hidden = true;
+  $('session-reference').textContent = '';
   try {
     await prepareAgent();
   } catch (error) {
+    showSessionReference({});
     showError(error.message);
     return;
   }
@@ -590,6 +609,7 @@ async function start() {
         markReady(session);
       } else if (peer.connectionState === 'failed') fail(session, new Error('WebRTC media failed. Check firewall rules or configure TURN.'));
       else if (peer.connectionState === 'disconnected') {
+        showSessionReference(session);
         session.ready = false;
         session.mic?.getAudioTracks().forEach(t => { t.enabled = false; });
         updateTextInput();

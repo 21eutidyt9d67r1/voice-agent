@@ -8,6 +8,7 @@
 #call-cost dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums}
 #call-cost details{margin-top:12px;padding:8px 0;border-bottom:0}
 #agent-model{overflow-wrap:anywhere}
+#session-reference{font-size:12px;text-align:left;overflow-wrap:anywhere;user-select:text}
 #agent-model-choice{margin-bottom:12px}
 .message p.transcribing{color:#718075;font-style:italic}
 .agent-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.agent-actions button{font-size:12px;padding:9px 12px}.recording-notice{font-size:12px;text-align:left;background:#eef1df;border:1px solid #d8dfbf;border-radius:10px;padding:12px;margin:16px 0;color:#425538}.transcript-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}dialog{width:min(900px,94vw);max-height:85vh;border:1px solid #dce3d8;border-radius:16px;padding:22px;color:#24362f}dialog::backdrop{background:#16281c66}dialog pre{font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f5ed;padding:16px;border-radius:10px}dialog p{font-size:12px}

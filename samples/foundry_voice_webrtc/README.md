@@ -743,6 +743,7 @@ For `azure-realtime-flash-2026-10-14`, the same handshake instead sets
 `auto_truncate: false`, keeps `interrupt_response: true`, and removes only
 `conversation.item.truncated.item` from the include list. Input remains disabled
 until Azure acknowledges truncation is off and the selector is absent.
+The runtime model ID `azure-realtime-flash-1` receives the same Flash policy.
 A disabled/missing VAD or disabled automatic responses is reported as a setup
 error rather than silently replacing the saved turn-detection mode.
 
@@ -791,6 +792,12 @@ This sample uses the Foundry voice-agent WebRTC signaling protocol described
 above, not the separate Azure OpenAI `/openai/v1/realtime/calls` flow.
 
 ## Troubleshooting
+
+The call panel shows the Azure **Session ID** when the service reports it and
+keeps it visible after a failed response, connection failure, or disconnect.
+Copy it when reporting a problem. If startup fails before Azure returns an ID,
+the panel explicitly reports that the Session ID is unavailable. Starting a new
+call clears the previous call's ID; session IDs are not saved in browser storage.
 
 | Symptom | Action |
 | --- | --- |

@@ -52,7 +52,7 @@ def truncation_update(session):
         include = []
     if not isinstance(include, list) or any(not isinstance(value, str) for value in include):
         raise SessionConfigurationError("Azure returned an invalid session include list.")
-    auto_truncate = session.get("model") != FLASH_MODEL
+    auto_truncate = session.get("model") not in {FLASH_MODEL, "azure-realtime-flash-1"}
     include = list(dict.fromkeys(
         [*include, TRUNCATED_ITEM_INCLUDE] if auto_truncate else
         [value for value in include if value != TRUNCATED_ITEM_INCLUDE]))
