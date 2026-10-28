@@ -166,11 +166,11 @@ Audio defaults follow
 **450 input** and **900 output** audio tokens before the silence adjustment. Both rates
 remain editable for other model families or measured usage.
 
-**Both-parties-silent ratio defaults to 20%** and is editable from 0 to 100%.
-The suggested 10-30% range is a planning assumption, not a universal average.
+**Both-parties-silent ratio defaults to 5%** and is editable from 0 to 100%.
+This default is a planning assumption, not a universal average.
 Multiply each side's entered speech seconds by `1 - silencePercent / 100`
-before calculating audio tokens. The default therefore models **36 seconds
-per side**, **360 input tokens**, and **720 output tokens**, with 18 seconds
+before calculating audio tokens. The default therefore models **42.75 seconds
+per side**, **427.5 input tokens**, and **855 output tokens**, with 4.5 seconds
 of both-parties silence in the 90-second call.
 This scales fresh and replayed native audio, STT, and TTS usage only, not
 unit prices. Text, prompt, reasoning, turn count, GPT Live session minutes,

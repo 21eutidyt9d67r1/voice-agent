@@ -2,7 +2,7 @@ export const DEFAULTS = Object.freeze({
   duration: 90, turns: 4, humanSeconds: 45, agentSeconds: 45,
   inputAudioRate: 10, outputAudioRate: 20,
   userText: 150, agentText: 150, nativeText: 0, reasoning: 0,
-  cachePercent: 100, silencePercent: 20, prompt: 5000, calls: 10000,
+  cachePercent: 100, silencePercent: 5, prompt: 5000, calls: 10000,
 });
 
 export const PROMPTS = [0, 1000, 5000, 10000, 20000];
