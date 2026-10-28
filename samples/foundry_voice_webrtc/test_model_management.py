@@ -71,43 +71,45 @@ class ModelTests(unittest.IsolatedAsyncioTestCase):
             for model in MODELS:
                 self.assertEqual(transcription_model(model_definition(changed, model)), choice)
 
-    def test_flash_uses_standard_voices_and_model_catalog_matches_ui(self):
+    def test_standard_voice_models_and_model_catalog_match_ui(self):
         import re
-        flash = "azure-realtime-flash-2026-10-14"
-        self.assertIn(flash, MODELS)
         html = Path(__file__).with_name("public").joinpath("index.html").read_text(encoding="utf-8")
         select = re.search(r'<select id="agent-model-choice".*?</select>', html, re.S).group()
         self.assertEqual(set(re.findall(r'<option value="([^"]+)"', select)), MODELS | {LIVE_MODEL})
         original = self.definition()
-        changed = model_definition(original, flash)
-        self.assertEqual(changed["model"], flash)
-        self.assertEqual(changed["model_type"], "managed")
-        self.assertEqual(changed["audio"]["output"], original["audio"]["output"])
         native = model_definition(original, "azure-realtime")
-        restored = model_definition(native, flash)
-        self.assertEqual(restored["audio"]["output"]["voice"], "en-US-Tyler:DragonHDLatestNeural")
-        self.assertEqual(restored["audio"]["output"]["voice_type"], "azure-standard")
+        for model in ("azure-realtime-flash-2026-10-14", "gpt-realtime-2.1-mini"):
+            with self.subTest(model=model):
+                self.assertIn(model, MODELS)
+                changed = model_definition(original, model)
+                self.assertEqual(changed["model"], model)
+                self.assertEqual(changed["model_type"], "managed")
+                self.assertEqual(changed["audio"]["output"], original["audio"]["output"])
+                restored = model_definition(native, model)
+                self.assertEqual(restored["audio"]["output"]["voice"], "en-US-Tyler:DragonHDLatestNeural")
+                self.assertEqual(restored["audio"]["output"]["voice_type"], "azure-standard")
 
-    async def test_flash_can_be_saved_without_deleting_previous_versions(self):
-        flash = "azure-realtime-flash-2026-10-14"
+    async def test_standard_voice_models_can_be_saved_without_deleting_previous_versions(self):
         cfg = Settings("https://example.services.ai.azure.com/api/projects/demo", "demo-agent")
-        service = ServiceClient([Response(200, self.agent()), Response(200, self.agent(flash, "2"))],
-                                [Response(201, {"version": "2"}), Response(204)])
-        async with TestClient(TestServer(create_app(cfg, AsyncMock()))) as client:
-            config = await (await client.get("/api/config")).json()
-            self.assertIn(flash, config["models"])
-            with patch("server.aiohttp.ClientSession", return_value=service):
-                response = await client.post("/api/agent/model",
-                    headers={"Origin": str(client.make_url("")).rstrip("/")},
-                    json={"model": flash, "version": "1"})
-                result = await response.json()
-        self.assertEqual(response.status, 200, result)
-        self.assertEqual(result["model"], flash)
-        published = service.writes[0][1]["json"]
-        self.assertEqual(published["definition"]["model"], flash)
-        self.assertEqual(published["definition"]["audio"]["output"]["voice_type"], "azure-standard")
-        self.assertEqual(published["metadata"]["custom"], "keep")
-        self.assertEqual(service.removals, [])
+        for model in ("azure-realtime-flash-2026-10-14", "gpt-realtime-2.1-mini"):
+            with self.subTest(model=model):
+                service = ServiceClient([Response(200, self.agent()), Response(200, self.agent(model, "2"))],
+                                        [Response(201, {"version": "2"}), Response(204)])
+                async with TestClient(TestServer(create_app(cfg, AsyncMock()))) as client:
+                    config = await (await client.get("/api/config")).json()
+                    self.assertIn(model, config["models"])
+                    with patch("server.aiohttp.ClientSession", return_value=service):
+                        response = await client.post("/api/agent/model",
+                            headers={"Origin": str(client.make_url("")).rstrip("/")},
+                            json={"model": model, "version": "1"})
+                        result = await response.json()
+                self.assertEqual(response.status, 200, result)
+                self.assertEqual(result["model"], model)
+                published = service.writes[0][1]["json"]
+                self.assertEqual(published["definition"]["model"], model)
+                self.assertEqual(published["definition"]["audio"]["output"]["voice_type"], "azure-standard")
+                self.assertEqual(published["metadata"]["custom"], "keep")
+                self.assertEqual(service.removals, [])
 
     async def test_transcription_only_versions_preserve_native_voice_and_other_settings(self):
         cfg = Settings("https://example.services.ai.azure.com/api/projects/demo", "demo-agent")

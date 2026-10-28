@@ -5,7 +5,7 @@ import { returnedCallCost } from './call-cost.mjs';
 const $ = (id) => document.getElementById(id);
 let config, call = null;
 const messages = new Map();
-const modelChoices = ['gpt-realtime-2.1', 'azure-realtime', 'azure-realtime-flash-2026-10-14', 'gpt-5.4', 'gpt-live-1'];
+const modelChoices = ['gpt-realtime-2.1', 'gpt-realtime-2.1-mini', 'azure-realtime', 'azure-realtime-flash-2026-10-14', 'gpt-5.4', 'gpt-live-1'];
 let preparingAgent = false;
 let agentAvailability = 'unknown';
 let savedModel = null, savedVersion = null, savedTranscription = null, latestDownload = null, downloading = false;

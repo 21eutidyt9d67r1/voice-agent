@@ -192,7 +192,8 @@ sample without adding cross-replica creation coordination.
 ### Models, versions, and Agent YAML
 
 The **Version** line shows the saved Agent's current version. End the call, choose
-`gpt-realtime-2.1`, `azure-realtime`, **Azure Realtime Flash**
+`gpt-realtime-2.1`, **GPT Realtime 2.1 mini** (`gpt-realtime-2.1-mini`),
+`azure-realtime`, **Azure Realtime Flash**
 (`azure-realtime-flash-2026-10-14`), `gpt-5.4`, or **GPT Live**, then select **Save new version**.
 This publishes and enables a new version without deleting previous versions.
 Instructions, tools, metadata, and other configuration are preserved except for
@@ -203,6 +204,8 @@ single backend replica, not independent Foundry editors.
 
 Selecting a model previews compatible voices immediately; **Model** and **Version**
 continue to report the saved configuration until publication succeeds.
+GPT Realtime 2.1 mini uses the same Azure Speech HD voice selector and independent
+transcription choices as GPT Realtime 2.1.
 `azure-realtime` uses native voice `ava` by default. Switching from native output
 to a GPT model or Azure Realtime Flash selects `en-US-Tyler:DragonHDLatestNeural`.
 Flash uses the Azure Speech HD voice selector, not the `azure-realtime` native
