@@ -265,6 +265,20 @@ test('Agent creation UI reports creation and enables required personalization', 
   assert.deepEqual(requests[2], ['/api/agent/prepare', 'POST']);
 });
 
+test('Agent setup reports a corrected Toolbox reference and the new saved version', async () => {
+  const ui = await setup('websocket', {
+    fetch: async url => ({ok:true, json:async()=>url === '/api/config' ? {configured:true} :
+      url === '/api/agent' ? {exists:true} :
+        {created:false, toolboxReferenceUpdated:true, version:'6', weatherEnabled:true}}),
+  });
+  ui.stop();
+  await ui.prepareAgent();
+  assert.equal(ui.element('agent-preparation').textContent,
+    'Weather Toolbox reference corrected and saved in a new Agent version.');
+  assert.equal(ui.element('agent-version').textContent, '6');
+  assert.equal(ui.element('weather-tool-hint').hidden, false);
+});
+
 for (const model of ['azure-realtime-flash-2026-10-14', 'gpt-realtime-2.1-mini']) {
   test(`${model} saves the exact model ID and uses standard voices`, async () => {
     const writes = [];

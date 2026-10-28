@@ -77,6 +77,19 @@ class SessionConfiguration:
         if frame.get("type") != "session.updated":
             return False
         session = frame.get("session") or {}
+        if self.update is None and session.get("model") in {FLASH_MODEL, "azure-realtime-flash-1"}:
+            audio_input = (session.get("audio") or {}).get("input") or {}
+            vad = audio_input.get("turn_detection") if "turn_detection" in audio_input else session.get("turn_detection")
+            if (not session.get("id") or not isinstance(vad, dict) or not vad.get("type")
+                    or vad.get("create_response") is False
+                    or (self.session_id is not None and session["id"] != self.session_id)):
+                self.ready = False
+                raise SessionConfigurationError(
+                    "The saved Flash Agent must report a consistent session ID and server-side turn detection with automatic responses.")
+            self.session_id = session["id"]
+            first_ready = not self.ready
+            self.ready = True
+            return first_ready
         if self.update is None:
             self.update = truncation_update(session)
             self.session_id = session.get("id")
@@ -504,6 +517,29 @@ async def prepare_weather_toolbox(client, cfg, headers):
     return {"type": "toolbox", "toolbox_name": WEATHER_TOOLBOX_NAME, "toolbox_version": number}
 
 
+async def resolve_weather_toolbox_references(client, cfg, headers, definition):
+    updated = copy.deepcopy(definition)
+    replacement = None
+    for tool in updated.get("tools") or []:
+        if not isinstance(tool, dict) or tool.get("type") != "toolbox" or tool.get("toolbox_name") != WEATHER_TOOLBOX_NAME:
+            continue
+        number = tool.get("toolbox_version")
+        if not isinstance(number, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", number):
+            raise AgentPreparationError("The saved weather Toolbox reference has an invalid version. Correct it in Foundry before starting.")
+        url = (f"{cfg.project_url()}/toolboxes/{WEATHER_TOOLBOX_NAME}/versions/{quote(number, safe='')}"
+               f"?{urlencode({'api-version': cfg.api_version})}")
+        async with client.get(url, headers=headers, allow_redirects=False) as response:
+            if response.status == 200:
+                continue
+            if response.status != 404:
+                raise AgentPreparationError(
+                    f"Weather Toolbox version lookup failed (HTTP {response.status}). The Agent was not changed.")
+        if replacement is None:
+            replacement = await prepare_weather_toolbox(client, cfg, headers)
+        tool["toolbox_version"] = replacement["toolbox_version"]
+    return updated
+
+
 async def lookup_configured_agent(client, cfg, headers, *, include_version=False):
     required = set(json.loads((ROOT / "personalized-agent.json").read_text())["structured_inputs"])
     async with client.get(cfg.agent_url(), headers=headers, allow_redirects=False) as response:
@@ -553,17 +589,28 @@ async def prepare_configured_agent(client, cfg, headers):
     definition = latest["definition"] if latest is not None else None
     version = latest.get("version") if latest is not None else None
     created = definition is None
+    repaired = False
     if created:
         definition = json.loads((ROOT / "personalized-agent.json").read_text())
         if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", cfg.agent):
             raise AgentPreparationError("The configured Agent name must be 1-63 alphanumeric/hyphen characters, starting and ending with an alphanumeric character.")
         definition["tools"] = [await prepare_weather_toolbox(client, cfg, headers)]
+    else:
+        resolved = await resolve_weather_toolbox_references(client, cfg, headers, definition)
+        repaired = resolved != definition
+        if repaired:
+            current = await lookup_configured_agent(client, cfg, headers, include_version=True)
+            if current != latest:
+                raise AgentPreparationError("The Agent changed during Toolbox setup. Retry preparation; it was not overwritten.")
+            definition = resolved
+    if created or repaired:
         url = f"{cfg.project_url()}/agents/{quote(cfg.agent, safe='')}/versions?{urlencode({'api-version': cfg.api_version})}"
         async with client.post(url, headers=headers, json={
-            "definition": definition, "metadata": {"sample": "foundry_voice_webrtc"}
+            "definition": definition,
+            "metadata": {"sample": "foundry_voice_webrtc"} if created else latest.get("metadata", {})
         }, allow_redirects=False) as publish:
             if publish.status not in {200, 201}:
-                raise AgentPreparationError(f"Agent creation failed (HTTP {publish.status}). Check creation permissions and model/voice availability.")
+                raise AgentPreparationError(f"Agent publication failed (HTTP {publish.status}). Check permissions and model/voice availability.")
             published = await publish.json()
             if not isinstance(published, dict) or not isinstance(published.get("version"), str):
                 raise AgentPreparationError("The Agent was published but its version could not be verified. Retry setup without resetting.")
@@ -573,7 +620,8 @@ async def prepare_configured_agent(client, cfg, headers):
         if enabled.status != 204:
             raise AgentPreparationError(f"Agent enable failed (HTTP {enabled.status}). Retry preparation; an existing version will not be overwritten.")
     required = set(json.loads((ROOT / "personalized-agent.json").read_text())["structured_inputs"])
-    return {"agent": cfg.agent, "created": created, "model": definition.get("model"),
+    return {"agent": cfg.agent, "created": created, "toolboxReferenceUpdated": repaired,
+            "model": definition.get("model"),
             "modelChoice": LIVE_MODEL if definition.get("sub_protocol") == "live" else definition.get("model"),
             "transcriptionModel": transcription_model(definition),
             "version": version,

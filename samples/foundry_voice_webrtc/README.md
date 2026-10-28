@@ -15,8 +15,8 @@ recreate only the configured sample Agent. The agent retains its saved instructi
 voice configuration by default. The backend sends a narrow `session.update` for
 the **active session only** to enable automatic interruption truncation and
 retained-item events, preserving the applied turn-detection settings, except for
-Azure Realtime Flash, where automatic truncation and retained-item enrichment
-are disabled. This
+Azure Realtime Flash, where the additional startup update is skipped and
+the service-applied settings are left unchanged. This
 session update does not edit the saved Agent; the browser cannot send one.
 Optional session-start personalization and output-voice selection do not edit the saved Agent.
 
@@ -152,7 +152,9 @@ saved Agent without creating or enabling anything:
    weather Toolbox, then creates, saves, and enables the Agent before requesting
    microphone access.
 2. **Saved Agent found:** select **Start conversation** to reuse it. No new Agent
-   or version is created.
+   or version is created unless its weather Toolbox references a missing version.
+   In that case, setup publishes a corrected Agent version using the project's
+   latest published weather Toolbox version containing a `web_search` tool.
 3. **Next visit or restart:** the same project and stable name find the saved
    Agent automatically; there is no setup to repeat.
 
@@ -168,24 +170,28 @@ name, definition, or Azure credential is accepted from the browser.
 
 The **Model** line reads the saved Agent's model, rather than assuming the demo
 default. Before creation it shows `gpt-realtime-2.1 (after setup)`; a failed lookup
-shows `Unavailable`. New demo Agents answer only the latest request, avoid
-repeating earlier capability lists or adding routine follow-up questions, and
-do not claim reminder or messaging tools that are not connected.
-When asked to introduce itself, the Agent identifies itself as **Foundry Voice
-Agent**, not ChatGPT, without repeating that identity in ordinary replies.
+shows `Unavailable`. New demo Agents use the **Riley** prompt, organized into
+Personality, Environment, Tone, Goal, and Guardrails. Replies are brief and spoken,
+with one question at a time. The existing structured-input language policy and
+untrusted personalization context remain appended, and the configured greeting
+opens the conversation without being repeated. The prompt requests human handoff,
+but this sample does not provide a handoff integration.
 The saved setup uses managed **gpt-realtime-2.1**, **mai-transcribe-2** input transcription,
 and the selected Azure Speech HD output voice. Azure semantic turn detection
 keeps the headset noise-reduction processing on the service-owned audio path;
 GPT Realtime's upstream-owned `server_vad` rejects that denoiser.
-The Agent speaks one brief acknowledgement, such as "Let me check that for
-you," before invoking web search on any topic. The saved prompt makes it follow the
-session language policy and keeps the filler out of the final answer. This is
-model-generated speech from the Agent, not browser speech synthesis or an
-extra client response request. This explicit pre-tool prompt is used instead
-of relying on service `interim_response` support for Toolbox calls.
+Tool descriptions remain in the attached Toolbox rather than the bundled Agent
+instructions. The prompt does not require weather searches or spoken pre-tool
+acknowledgements; tool selection uses the available tool definitions with
+`tool_choice: auto`.
 
 An existing voice Agent is reused without changing its instructions, voice,
-denoise settings, or versions. A non-voice Agent, or an Agent missing required
+denoise settings, or valid Toolbox version pins. Setup checks the saved weather
+Toolbox version before enabling the Agent; only a confirmed missing version is
+repaired. The corrected version preserves metadata, other tools, and all other
+Agent settings. Permission and service errors stop setup rather than triggering
+a replacement. An existing Agent without a weather Toolbox is left unchanged.
+A non-voice Agent, or an Agent missing required
 demo inputs when `PERSONALIZATION_REQUIRED=true`, fails visibly instead of being
 overwritten. A lookup authorization failure is never treated as a missing Agent.
 Agent preparation is serialized within the single-replica demo; do not scale this
@@ -317,7 +323,9 @@ and restored when switching back to another realtime model. Other models keep
 their configured greetings. This does not resolve unrelated Flash inference errors.
 Flash also disables automatic interruption truncation (`auto_truncate: false`)
 for both WebSocket and WebRTC sessions, while keeping interruption enabled.
-The retained-item include selector is removed for Flash, and the transcript
+For Flash, the bridge skips its additional startup `session.update` and enables
+input after Foundry's first `session.updated` event. It does not modify the
+applied VAD settings or include selectors. The transcript
 warns that interrupted text may include unheard output. Other realtime models
 continue using automatic truncation and authoritative retained-item events.
 
@@ -353,7 +361,7 @@ can trigger preparation; use Entra sign-in for deployments outside a controlled 
 
 Web search is part of the normal Agent setup, not a browser-side function or a
 weather-only API. The Toolbox retains its legacy **weather** name for
-compatibility, but its prompt and tool descriptions allow searches on any topic.
+compatibility, but its tool descriptions allow searches on any topic.
 Before publishing a new demo Agent, the backend checks for this Toolbox in the
 same Foundry project:
 
@@ -689,7 +697,8 @@ short-lived, limited TURN credentials: ICE configuration is sent to the browser.
 ```
 
 This opens a short-lived WebSocket session using Azure CLI authentication, applies
-the same active-session truncation update as the app, waits for its acknowledgment,
+the same startup policy as the app (no additional update for Flash; truncation
+update and acknowledgment for other realtime models),
 and closes. It sends no microphone audio or user message.
 It prints sanitized status information, not tokens or session contents. A saved
 agent may still generate a greeting. Success establishes session readiness, not
@@ -739,11 +748,11 @@ preserves the reported VAD type/options and the **whole existing include list**,
 adds `conversation.item.truncated.item` without duplicates, and sets
 `auto_truncate: true` and its prerequisite `interrupt_response: true`.
 It does not change instructions, model, voice, tools, formats, or saved agents.
-For `azure-realtime-flash-2026-10-14`, the same handshake instead sets
-`auto_truncate: false`, keeps `interrupt_response: true`, and removes only
-`conversation.item.truncated.item` from the include list. Input remains disabled
-until Azure acknowledges truncation is off and the selector is absent.
-The runtime model ID `azure-realtime-flash-1` receives the same Flash policy.
+For `azure-realtime-flash-2026-10-14`, the bridge instead skips the additional
+startup update entirely. Input becomes ready after the first `session.updated`;
+the service-applied truncation, interruption, include selectors, and tools remain
+unchanged. The runtime model ID `azure-realtime-flash-1` receives the same
+Flash-only bypass. Other realtime models retain the update/acknowledgment handshake.
 A disabled/missing VAD or disabled automatic responses is reported as a setup
 error rather than silently replacing the saved turn-detection mode.
 

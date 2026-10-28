@@ -200,7 +200,9 @@ async function prepareAgent(recreate = false) {
     if (!response.ok) throw new Error(result.error || 'Could not prepare the Agent. Check server configuration and permissions.');
     agentAvailability = 'ready';
     applyAgentDetails(result);
-    $('agent-preparation').textContent = result.recreated ? 'Your Agent has been reset and saved.' : 'Your Agent is saved and ready.';
+    $('agent-preparation').textContent = result.recreated ? 'Your Agent has been reset and saved.' :
+      result.toolboxReferenceUpdated ? 'Weather Toolbox reference corrected and saved in a new Agent version.' :
+        'Your Agent is saved and ready.';
     state('Ready when you are', 'Start a conversation with your saved Agent.', 'Saved Agent');
   } catch (error) {
     agentAvailability = 'error';

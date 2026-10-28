@@ -1,4 +1,4 @@
-"""Agent preparation only publishes after a verified missing-Agent lookup."""
+"""Agent preparation creates missing Agents and repairs missing Toolbox versions."""
 
 import asyncio
 import json
@@ -96,7 +96,7 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
     async def test_saved_model_is_reported_instead_of_the_template_default(self):
         agent = self.agent()
         agent["versions"]["latest"]["definition"]["model"] = "saved-custom-model"
-        client = Client([Response(200, agent), Response(200, agent)], [Response(204)])
+        client = Client([Response(200, agent), Response(200, agent), Response(200)], [Response(204)])
         self.assertEqual((await inspect_configured_agent(client, self.config(), {}))["model"], "saved-custom-model")
         self.assertEqual((await prepare_configured_agent(client, self.config(), {}))["model"], "saved-custom-model")
 
@@ -140,13 +140,81 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
                     prepare.assert_not_awaited()
 
     async def test_existing_agent_only_enables_without_publishing(self):
-        client = Client([Response(200, self.agent())], [Response(204)])
+        client = Client([Response(200, self.agent()), Response(200)], [Response(204)])
         result = await prepare_configured_agent(client, self.config(), {})
         self.assertFalse(result["created"])
+        self.assertFalse(result["toolboxReferenceUpdated"])
         self.weather.assert_not_awaited()
         self.assertTrue(result["personalizationRequired"])
         self.assertEqual(len(client.writes), 1)
         self.assertIn(":enable?", client.writes[0][0])
+
+    async def test_missing_weather_version_is_repaired_without_replacing_agent_settings(self):
+        agent = self.agent()
+        latest = agent["versions"]["latest"]
+        latest["metadata"] = {"sample": "foundry_voice_webrtc", "custom": "keep"}
+        tool = latest["definition"]["tools"][0]
+        tool.update(toolbox_version="2", response_scheduling="when_idle")
+        latest["definition"]["tools"].append({"type": "function", "name": "other"})
+        expected = json.loads(json.dumps(latest["definition"]))
+        expected["tools"][0]["toolbox_version"] = "1"
+        client = Client([Response(200, agent), Response(404), Response(200, agent)],
+                        [Response(201, {"version": "6"}), Response(204)])
+        result = await prepare_configured_agent(client, self.config(), {})
+        self.assertFalse(result["created"])
+        self.assertTrue(result["toolboxReferenceUpdated"])
+        self.assertEqual(result["version"], "6")
+        self.assertEqual(client.writes[0][1]["json"],
+                         {"definition": expected, "metadata": latest["metadata"]})
+        self.assertEqual(tool["toolbox_version"], "2")
+        self.assertEqual(client.removals, [])
+        self.assertIn(":enable?", client.writes[1][0])
+
+    async def test_weather_version_lookup_errors_never_publish_or_enable(self):
+        for status in (401, 403, 429, 500):
+            client = Client([Response(200, self.agent()), Response(status)])
+            with self.subTest(status=status), self.assertRaisesRegex(
+                    AgentPreparationError, "Weather Toolbox version lookup failed"):
+                await prepare_configured_agent(client, self.config(), {})
+            self.weather.assert_not_awaited()
+            self.assertEqual(client.writes, [])
+
+    async def test_invalid_weather_version_is_rejected_without_writes(self):
+            for number in (None, "", "../2", 2):
+                agent = self.agent()
+                agent["versions"]["latest"]["definition"]["tools"][0]["toolbox_version"] = number
+                client = Client([Response(200, agent)])
+                with self.subTest(version=number), self.assertRaisesRegex(
+                        AgentPreparationError, "invalid version"):
+                    await prepare_configured_agent(client, self.config(), {})
+                self.assertEqual(client.writes, [])
+            self.weather.assert_not_awaited()
+
+    async def test_weather_repair_does_not_overwrite_concurrent_agent_changes(self):
+        agent = self.agent()
+        agent["versions"]["latest"]["definition"]["tools"][0]["toolbox_version"] = "2"
+        changed = json.loads(json.dumps(agent))
+        changed["versions"]["latest"]["version"] = "2"
+        client = Client([Response(200, agent), Response(404), Response(200, changed)])
+        with self.assertRaisesRegex(AgentPreparationError, "Agent changed"):
+            await prepare_configured_agent(client, self.config(), {})
+        self.assertEqual(client.writes, [])
+
+    async def test_weather_repair_failure_never_publishes_or_enables(self):
+        self.weather.side_effect = AgentPreparationError("Weather Toolbox unavailable")
+        client = Client([Response(200, self.agent()), Response(404)])
+        with self.assertRaisesRegex(AgentPreparationError, "Weather Toolbox unavailable"):
+            await prepare_configured_agent(client, self.config(), {})
+        self.assertEqual(client.writes, [])
+
+    async def test_agent_without_weather_is_not_given_new_tools(self):
+        agent = self.agent()
+        agent["versions"]["latest"]["definition"].pop("tools")
+        client = Client([Response(200, agent)], [Response(204)])
+        result = await prepare_configured_agent(client, self.config(), {})
+        self.assertFalse(result["weatherEnabled"])
+        self.assertEqual(len(client.writes), 1)
+        self.weather.assert_not_awaited()
 
     async def test_missing_agent_is_created_with_demo_definition_then_enabled(self):
         client = Client([Response(404), Response(200)], [Response(201), Response(204)])
@@ -164,11 +232,11 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(definition["audio"]["input"]["noise_reduction"]["type"],
                          "azure_deep_noise_suppression_headset")
         self.assertEqual(definition["tools"], [self.weather.return_value])
-        self.assertIn("WEATHER LOOKUP", definition["instructions"])
-        self.assertIn("TOOL ACKNOWLEDGEMENT", definition["instructions"])
-        self.assertIn("You are Foundry Voice Agent.", definition["instructions"])
-        self.assertIn("identify yourself as Foundry Voice Agent, not ChatGPT", definition["instructions"])
-        self.assertIn("Do not repeat your identity in ordinary replies", definition["instructions"])
+        self.assertNotIn("WEATHER LOOKUP", definition["instructions"])
+        self.assertNotIn("TOOL ACKNOWLEDGEMENT", definition["instructions"])
+        self.assertIn("You are Riley, a general-purpose voice assistant.", definition["instructions"])
+        self.assertIn("{{language_policy}}", definition["instructions"])
+        self.assertIn("The configured greeting opens the conversation. Do not repeat it.", definition["instructions"])
         self.assertIn(":enable?", client.writes[1][0])
 
     async def test_failed_weather_setup_never_publishes_an_agent(self):
@@ -268,6 +336,7 @@ class CreationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.removals[0][0], self.config().agent_url())
             self.assertIn("/agents/demo-agent/versions?", client.writes[0][0])
             client.gets.append(Response(200, self.agent()))
+            client.gets.append(Response(200))
             client.posts.append(Response(204))
             reused = await prepare_configured_agent(client, self.config(), {})
             self.assertFalse(reused["created"])

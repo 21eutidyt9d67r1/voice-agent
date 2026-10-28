@@ -31,7 +31,7 @@ async def frames(events):
 
 
 class ConfigurationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_flash_disables_truncation_and_removes_retained_selector_for_both_shapes(self):
+    async def test_flash_preserves_saved_settings_without_a_second_update_for_both_shapes(self):
         for stable in (True, False):
             with self.subTest(stable=stable):
                 original = saved_session(stable)
@@ -41,42 +41,41 @@ class ConfigurationTests(unittest.IsolatedAsyncioTestCase):
                 original_vad["auto_truncate"] = True
                 untouched = copy.deepcopy(original)
                 config, upstream = SessionConfiguration(), AsyncMock()
+                self.assertFalse(await config.observe({"type": "session.created", "session": original}, upstream))
+                self.assertFalse(config.ready)
+                self.assertTrue(await config.observe({"type": "session.updated", "session": original}, upstream))
+                self.assertTrue(config.ready)
                 self.assertFalse(await config.observe({"type": "session.updated", "session": original}, upstream))
-                update = upstream.send_json.call_args.args[0]["session"]
-                vad = update["audio"]["input"]["turn_detection"] if stable else update["turn_detection"]
-                self.assertEqual(vad, {**original_vad, "auto_truncate": False, "interrupt_response": True})
-                self.assertEqual(update["include"], ["existing.selector"])
+                upstream.send_json.assert_not_awaited()
                 self.assertEqual(original, untouched)
-                ack = {"id": original["id"], **copy.deepcopy(update)}
-                for bad in ("auto_truncate", "interrupt_response", "include", "id"):
-                    invalid = copy.deepcopy(ack)
-                    invalid_vad = invalid["audio"]["input"]["turn_detection"] if stable else invalid["turn_detection"]
-                    if bad == "auto_truncate":
-                        invalid_vad["auto_truncate"] = True
-                    elif bad == "interrupt_response":
-                        invalid_vad["interrupt_response"] = False
-                    elif bad == "include":
-                        invalid["include"].append(TRUNCATED_ITEM_INCLUDE)
-                    else:
-                        invalid["id"] = "another-session"
-                    with self.assertRaises(SessionConfigurationError):
-                        await config.observe({"type": "session.updated", "session": invalid}, upstream)
-                    self.assertFalse(config.ready)
-                self.assertTrue(await config.observe({"type": "session.updated", "session": ack}, upstream))
-                self.assertFalse(await config.observe({"type": "session.updated", "session": ack}, upstream))
 
-    async def test_flash_ready_after_disable_ack_for_both_transports(self):
+    async def test_flash_ready_after_first_saved_update_for_both_transports(self):
         for transport in ("websocket", "webrtc"):
             original = saved_session(transport == "websocket")
             original["model"] = "azure-realtime-flash-1"
             config, upstream, browser = SessionConfiguration(), AsyncMock(), AsyncMock()
             upstream.__aiter__.side_effect = lambda: frames([
                 {"type": "session.updated", "session": original},
-                {"type": "session.updated", "session": {**original, **truncation_update(original)["session"]}},
             ])
             await forward_upstream(upstream, browser, transport, config)
             self.assertTrue(config.ready)
             browser.send_json.assert_awaited_once_with({"type": "bridge.ready"})
+            upstream.send_json.assert_not_awaited()
+
+    async def test_flash_invalid_vad_fails_without_sending_update(self):
+        for stable in (True, False):
+            for vad in (None, {}, {"type": "server_vad", "create_response": False}):
+                original = saved_session(stable)
+                original["model"] = FLASH_MODEL
+                if stable:
+                    original["audio"]["input"]["turn_detection"] = vad
+                else:
+                    original["turn_detection"] = vad
+                config, upstream = SessionConfiguration(), AsyncMock()
+                with self.subTest(stable=stable, vad=vad), self.assertRaises(SessionConfigurationError):
+                    await config.observe({"type": "session.updated", "session": original}, upstream)
+                self.assertFalse(config.ready)
+                upstream.send_json.assert_not_awaited()
 
     async def test_saved_settings_preserved_and_ack_required_for_both_shapes(self):
         for stable in (True, False):
