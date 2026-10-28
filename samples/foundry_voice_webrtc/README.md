@@ -308,6 +308,12 @@ change preserves the existing prompt, AI greeting, tools, output voice, language
 and turn detection. Switching the Agent model also retains the saved
 transcription choice. Controls are disabled during calls and publication.
 
+`azure-realtime-flash-2026-10-14` disables the automatic greeting and waits for
+the caller's first turn. Saving this model also removes a greeting from an
+existing Flash definition. The previous greeting is retained in version metadata
+and restored when switching back to another realtime model. Other models keep
+their configured greetings. This does not resolve unrelated Flash inference errors.
+
 New Agents default to **`mai-transcribe-2`**. Existing Agents retain their saved
 choice until explicitly changed. The selector offers these exact IDs:
 `azure-speech`, `azure-speech-streaming`, `azure-llm-speech`, `mai-transcribe`,
