@@ -75,6 +75,33 @@ test('Agent creation UI reports creation and enables required personalization', 
   assert.deepEqual(requests[2], ['/api/agent/prepare', 'POST']);
 });
 
+test('Azure Realtime Flash saves the exact model ID and uses standard voices', async () => {
+  const flash = 'azure-realtime-flash-2026-10-14';
+  const writes = [];
+  const ui = await setup('websocket', {
+    fetch: async (url, options) => {
+      if (options?.body) writes.push(JSON.parse(options.body));
+      return {ok:true, json:async()=>url === '/api/config' ? {configured:true} :
+        {exists:true, model:options?.method === 'POST' ? flash : 'azure-realtime',
+          version:options?.method === 'POST' ? '2' : '1', transcriptionModel:'mai-transcribe-2'}};
+    },
+  });
+  ui.stop();
+  ui.element('agent-model-choice').value = flash;
+  ui.element('agent-model-choice').onchange();
+  assert.equal(ui.element('voice').hidden, false);
+  assert.equal(ui.element('native-voice').hidden, true);
+  assert.equal(ui.element('live-voice').hidden, true);
+  assert.equal(ui.element('agent-transcription-choice').disabled, false);
+  assert.equal(ui.element('save-model').disabled, false);
+  await ui.element('save-model').onclick();
+  assert.deepEqual(writes, [{model:flash, version:'1', transcriptionModel:'mai-transcribe-2'}]);
+  assert.equal(ui.element('agent-model-choice').value, flash);
+  assert.equal(ui.element('agent-model').textContent, flash);
+  assert.equal(ui.element('voice').hidden, false);
+  assert.equal(ui.element('native-voice').hidden, true);
+});
+
 test('GPT Live selection previews only its voices and omits independent transcription when saving', async () => {
   const requests = [];
   const ui = await setup('websocket', {
