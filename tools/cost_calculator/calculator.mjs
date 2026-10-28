@@ -14,9 +14,9 @@ export const MODELS = [
   { id: "gpt-realtime-2.1-mini", name: "GPT Realtime 2.1 mini", tier: "Std", realtime: true },
   { id: "gpt-realtime", name: "GPT Realtime 1.0 (gpt-realtime)", tier: "Pro", realtime: true },
   { id: "gpt-realtime-1.5", name: "GPT Realtime 1.5", tier: "Pro", realtime: true },
-  { id: "azure-realtime", name: "Azure Realtime", tier: "Pro", realtime: true, managedNativeOnly: true },
+  { id: "azure-realtime", name: "Azure Realtime", tier: "Pro", realtime: true, managedPipeline: "native" },
   { id: "azure-realtime-fast", name: "Azure Realtime Fast", tier: "Lite", realtime: true,
-    managedNativeOnly: true, tierAssumption: true },
+    managedPipeline: "hybrid", tierAssumption: true },
   { id: "gpt-4.1", name: "GPT-4.1", tier: "Pro" },
   { id: "gpt-4.1-mini", name: "GPT-4.1 mini", tier: "Std" },
   { id: "gpt-4.1-nano", name: "GPT-4.1 nano", tier: "Lite" },
@@ -31,7 +31,7 @@ export const MODELS = [
 ];
 
 export function supportsScenario(model, hosting, pipeline) {
-  if (model.managedNativeOnly) return hosting === "managed" && pipeline === "native";
+  if (model.managedPipeline) return hosting === "managed" && pipeline === model.managedPipeline;
   return ["native", "hybrid"].includes(pipeline) ? Boolean(model.realtime) : !model.realtime;
 }
 
@@ -63,9 +63,9 @@ export function meterRate(snapshot, name, unit = "tokens") {
   return meter.retailPrice * factor;
 }
 
-export function getRates(snapshot, model, hosting, pipeline = "cascade") {
-  if (model.managedNativeOnly && !supportsScenario(model, hosting, pipeline)) {
-    throw new Error(`${model.name} uses a managed native-audio tier reference; no BYOM or alternative-pipeline rates are verified.`);
+export function getRates(snapshot, model, hosting, pipeline = model.managedPipeline || "cascade") {
+  if (model.managedPipeline && !supportsScenario(model, hosting, pipeline)) {
+    throw new Error(`${model.name} uses a managed ${model.managedPipeline} tier reference; no BYOM or alternative-pipeline rates are verified.`);
   }
   const rates = { textInput: null, textCached: null, textOutput: null,
     audioInput: null, audioCached: null, audioOutput: null, speechInput: null, speechOutput: null,

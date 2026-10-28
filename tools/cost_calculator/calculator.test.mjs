@@ -5,7 +5,7 @@ import { DEFAULTS, MODELS, PROMPTS, GPT_LIVE_METER, supportsScenario, getRates, 
 
 const snapshot = JSON.parse((await readFile(new URL("./prices.json", import.meta.url), "utf8")).replace(/^\uFEFF/, ""));
 const model = id => MODELS.find(m => m.id === id);
-const book = (id, hosting = "managed", pipeline = model(id).realtime ? "native" : "cascade") =>
+const book = (id, hosting = "managed", pipeline = model(id).managedPipeline || (model(id).realtime ? "native" : "cascade")) =>
   getRates(snapshot, model(id), hosting, pipeline).rates;
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} != ${expected}`);
 
@@ -30,7 +30,7 @@ test("every supported model/hosting/pipeline combination resolves without a miss
   }
 });
 
-test("Azure Realtime uses Pro and Fast uses the explicit Lite assumption with native meters", () => {
+test("Azure Realtime uses Pro native audio and Fast uses Lite realtime text plus HD", () => {
   for (const [id, tier, expected] of [
     ["azure-realtime", "Pro", [4, 0.4, 16, 32, 0.4, 64]],
     ["azure-realtime-fast", "Lite", [0.11, 0.04, 0.44, 4, 0.04, 12]],
@@ -38,7 +38,8 @@ test("Azure Realtime uses Pro and Fast uses the explicit Lite assumption with na
     const m = model(id);
     assert.equal(m.tier, tier);
     assert.equal(Boolean(m.tierAssumption), id === "azure-realtime-fast");
-    const { rates, sources, usesGlobalReference } = getRates(snapshot, m, "managed", "native");
+    const pipeline = m.managedPipeline;
+    const { rates, sources, usesGlobalReference } = getRates(snapshot, m, "managed", pipeline);
     assert.equal(usesGlobalReference, false);
     const keys = ["textInput", "textCached", "textOutput", "audioInput", "audioCached", "audioOutput"];
     keys.forEach((key, index) => {
@@ -46,22 +47,38 @@ test("Azure Realtime uses Pro and Fast uses the explicit Lite assumption with na
       assert.equal(sources[key].armRegionName, "centralindia");
       assert.ok(sources[key].meterName.startsWith(`Voice Live API ${tier} - LLM `));
     });
-    const result = calculate({ ...DEFAULTS, nativeText: 150 }, "native", rates);
+    const result = calculate({ ...DEFAULTS, nativeText: 150 }, pipeline, rates);
     const [textInput, textCached, textOutput, audioInput, audioCached, audioOutput] = expected;
-    close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
-      360 * audioInput + 1620 * audioCached + 720 * audioOutput) / 1e6);
+    if (pipeline === "hybrid") {
+      close(rates.speechOutput, 25);
+      assert.equal(sources.speechOutput.meterName, "Voice Live API Lite - Standard Speech Audio Output Tokens");
+      assert.equal(sources.speechOutput.armRegionName, "centralindia");
+      close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
+        360 * audioInput + 540 * audioCached + 720 * 25) / 1e6);
+      assert.ok(result.rows.some(r => r.key === "speechOutput"));
+      assert.ok(result.rows.every(r => !["audioOutput", "speechInput", "liveMinute"].includes(r.key)));
+      const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, pipeline, rates);
+      close(noCache.list, (20225 * textInput + 900 * audioInput + 150 * textOutput + 720 * 25) / 1e6);
+      const reasoning = calculate({ ...DEFAULTS, reasoning: 100 }, pipeline, rates);
+      close(reasoning.list - result.list, 100 * textOutput / 1e6);
+      const silent = calculate({ ...DEFAULTS, silencePercent: 100 }, pipeline, rates);
+      close(silent.list, (5000 * textInput + 15225 * textCached + 150 * textOutput) / 1e6);
+    } else {
+      close(result.list, (5000 * textInput + 15225 * textCached + 150 * textOutput +
+        360 * audioInput + 1620 * audioCached + 720 * audioOutput) / 1e6);
+      assert.ok(result.rows.every(r => !["speechInput", "speechOutput", "liveMinute"].includes(r.key)));
+      const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, pipeline, rates);
+      close(noCache.list, (20000 * textInput + 1980 * audioInput + 720 * audioOutput) / 1e6);
+    }
     close(result.listPerMinute, result.list / 1.5);
     assert.deepEqual(result.missing, []);
-    assert.ok(result.rows.every(r => !["speechInput", "speechOutput", "liveMinute"].includes(r.key)));
-    const noCache = calculate({ ...DEFAULTS, cachePercent: 0 }, "native", rates);
-    close(noCache.list, (20000 * textInput + 1980 * audioInput + 720 * audioOutput) / 1e6);
   }
 });
 
-test("Azure models are selectable only for managed native audio, never substituted with GPT BYOM rates", () => {
+test("Azure models use their correct managed pipeline, never substituted with GPT BYOM rates", () => {
   for (const id of ["azure-realtime", "azure-realtime-fast"]) {
     for (const hosting of ["managed", "byom"]) for (const pipeline of ["native", "hybrid", "cascade", "live"]) {
-      const supported = hosting === "managed" && pipeline === "native";
+      const supported = hosting === "managed" && pipeline === (id === "azure-realtime-fast" ? "hybrid" : "native");
       assert.equal(supportsScenario(model(id), hosting, pipeline), supported);
       if (!supported) assert.throws(() => getRates(snapshot, model(id), hosting, pipeline), /no BYOM or alternative-pipeline rates/);
     }
@@ -138,7 +155,7 @@ test("GPT-5.6 Luna BYOM uses exact Standard Global inference meters and BYO spee
 
 test("all selectable models have priced scenarios across both hosting modes", () => {
   for (const hosting of ["managed", "byom"]) for (const m of MODELS) {
-    const pipeline = m.realtime ? "native" : "cascade";
+    const pipeline = m.managedPipeline || (m.realtime ? "native" : "cascade");
     if (!supportsScenario(m, hosting, pipeline)) continue;
     const result = calculate(DEFAULTS, pipeline, book(m.id, hosting));
     assert.notEqual(result.list, null, `${hosting} / ${m.id}`);
@@ -325,8 +342,9 @@ test("silence scales only audio rows, with zero preserving baseline and full sil
 test("all five prompt sizes grow monotonically for every priced model", () => {
   assert.deepEqual(PROMPTS, [0, 1000, 5000, 10000, 20000]);
   for (const m of MODELS) for (const hosting of ["managed", "byom"]) {
-    if (!supportsScenario(m, hosting, m.realtime ? "native" : "cascade")) continue;
-    const costs = PROMPTS.map(prompt => calculate({ ...DEFAULTS, prompt }, m.realtime ? "native" : "cascade", book(m.id, hosting)).list);
+    const pipeline = m.managedPipeline || (m.realtime ? "native" : "cascade");
+    if (!supportsScenario(m, hosting, pipeline)) continue;
+    const costs = PROMPTS.map(prompt => calculate({ ...DEFAULTS, prompt }, pipeline, book(m.id, hosting)).list);
     if (costs.every(c => c !== null)) {
       for (let i = 1; i < costs.length; i++) assert.ok(costs[i] >= costs[i - 1]);
     }
