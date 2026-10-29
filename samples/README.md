@@ -14,6 +14,12 @@ For the general browser UI, use the local
 independent shared MCP reference implementation, start with the
 [Finance documentation index](../docs/README.md).
 
+**Default Portal Templates use the public no-auth MCP.** Local MCP hosting,
+Dev Tunnel, `setup-local-examples.sh`, and local E2E are optional development
+paths, not prerequisites for browsing, publishing, or trying Templates.
+Finance CLI examples have separate managed-MCP configuration requirements;
+an existing customer-hosted MCP does not need a local tunnel.
+
 ## Choose a sample
 
 | Sample | What it demonstrates |
@@ -47,6 +53,8 @@ independent shared MCP reference implementation, start with the
 | [Hosted GitHub Copilot subagent](subagent/voice_subagent_hosted_agent/README.md) | Create a voice agent that delegates research, learning, and coding tasks to an existing hosted GitHub Copilot agent. |
 | [Finance with Handoff - Realtime](example1_finance_with_handoff_realtime/README.md) | Finance graph on the Realtime pipeline (`gpt-realtime-regional`) with a text Voice WebSocket CLI. |
 | [Finance with Handoff - Cascade](example1_finance_with_handoff_cascade/README.md) | Finance graph on the Cascade pipeline (`gpt-4.1-mini`, Azure Speech) in its own directory, with its own CLI. |
+| [Finance with Handoff - Realtime, Hindi](example1_finance_with_handoff_realtime_hi_in/README.md) | Independent `hi-IN` input/output version using GPT Realtime, Azure Speech, and Swara, with English business instructions. |
+| [Finance with Handoff - Cascade, Hindi](example1_finance_with_handoff_cascade_hi_in/README.md) | Independent `hi-IN` input/output version using GPT-4.1 mini, Azure Speech, and Swara, with English business instructions. |
 | [Finance with OTP and Officer Search](example2_finance_with_OTP_and_Officer_Search/README.md) | Publish a flat Finance Agent for OTP verification and loan-officer search, then run a text smoke test. |
 | [Elevator Service with Safety, Zendesk, and Handoff](example3_elevator_service_with_safety_zendesk_and_handoff/README.md) | Publish an inbound field-service graph with deterministic safety checks, explicit Zendesk ticket confirmation, exact-ID status queries, and human-assistance routing. |
 | [Front Desk with Fluency and Handoff](example4_frontdesk_with_fluency_and_handoff/README.md) | Load a response-first receptionist Template with company FAQ, grounded support search, honest transfer fallback, and callback-message persistence only after explicit confirmation. |
@@ -154,7 +162,7 @@ PowerShell:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r samples\requirements.txt
-Copy-Item samples\.env.example samples\.env
+if (-not (Test-Path samples\.env)) { Copy-Item samples\.env.example samples\.env }
 ```
 
 Linux, macOS, or WSL2:
@@ -162,7 +170,7 @@ Linux, macOS, or WSL2:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r samples/requirements.txt
-cp samples/.env.example samples/.env
+[ -f samples/.env ] || cp samples/.env.example samples/.env
 ```
 
 The single `pip install` command installs every common Python sample
