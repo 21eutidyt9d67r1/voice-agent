@@ -180,10 +180,12 @@ The saved setup uses managed **gpt-realtime-2.1**, **mai-transcribe-2** input tr
 and the selected Azure Speech HD output voice. Azure semantic turn detection
 keeps the headset noise-reduction processing on the service-owned audio path;
 GPT Realtime's upstream-owned `server_vad` rejects that denoiser.
-Tool descriptions remain in the attached Toolbox rather than the bundled Agent
-instructions. The prompt does not require weather searches or spoken pre-tool
-acknowledgements; tool selection uses the available tool definitions with
-`tool_choice: auto`.
+Tool descriptions remain in the attached Toolbox. The bundled Agent's `WEB SEARCH`
+policy requires lookup requests and current or changing facts, including the current
+time in a city, to use search before answering. It requires grounded answers and
+honest lookup-failure handling, without forcing tools for greetings, casual conversation,
+or simple arithmetic. It does not require spoken pre-tool acknowledgements;
+tool selection remains `tool_choice: auto`.
 
 An existing voice Agent is reused without changing its instructions, voice,
 denoise settings, or valid Toolbox version pins. Setup checks the saved weather
@@ -372,9 +374,15 @@ same Foundry project:
 - Permission errors, incompatible Toolboxes, or failed creation stop setup
   visibly; an existing Toolbox is never overwritten.
 
-The Agent searches when the caller requests a lookup or facts need verification,
-then gives a concise answer grounded in the results. It asks for a location or
-date only when relevant to the question, not before every search. Try **"Search
+New demo Agents search when the caller requests a lookup or facts need verification,
+including current or changing facts, then give a concise answer grounded in the results.
+For example, **"What is the time now in Beijing?"** requires a lookup even without
+an explicit request to search. The Agent must attempt the lookup before claiming
+it lacks real-time access and honestly explain any lookup failure rather than inventing
+results. The Live speech model delegates these requests to its Responses backend,
+which uses `web_search` instead of the legacy Toolbox.
+The Agent asks for a location or date only when relevant to the question, not
+before every search. Try **"Search
 the web for the latest Azure AI announcements"** or **"Find the official Python
 asyncio documentation"**. Weather searches retain location/date guidance; try
 **"What is the weather in Seattle today?"**. Weather results are web-search

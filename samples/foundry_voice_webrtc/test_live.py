@@ -86,6 +86,14 @@ class LiveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result["transcriptionModel"])
         payload = service.writes[0][1]["json"]
         self.assertEqual(payload["definition"], live)
+        for instructions in (payload["definition"]["instructions"],
+                             payload["definition"]["delegation"]["responses"]["instructions"]):
+            self.assertIn("current time in a city", instructions)
+            self.assertIn("Do not claim you lack real-time access without attempting the lookup", instructions)
+            self.assertIn("If the lookup fails, explain that honestly.", instructions)
+        self.assertIn("Handle greetings and casual conversation yourself.", payload["definition"]["instructions"])
+        self.assertEqual(payload["definition"]["delegation"]["responses"]["instructions"].count(
+            "\n\nWEB SEARCH\n"), 1)
         self.assertEqual(payload["metadata"], {"custom": "keep", "realtime_source_version": "1"})
         self.assertEqual(service.removals, [])
 
