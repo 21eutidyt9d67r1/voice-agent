@@ -65,18 +65,14 @@ def project_endpoint(value: str | None) -> str:
 
 
 def voice_definition(model: str, voice: str, responses_model: str | None,
-                     transfer_targets: list[str] | None = None) -> dict:
-    targets = [target_name(name) for name in transfer_targets or []]
-    if len(targets) > 128:
-        raise ValueError("Configure at most 128 transfer target names")
-    if len({name.lower() for name in targets}) != len(targets):
-        raise ValueError("Transfer target names must be unique")
+                     transfer_targets: list[dict] | None = None) -> dict:
+    targets = transfer_targets or []
     definition = {
         "kind": "voice", "sub_protocol": "live", "model_type": "self_deployed",
         "model": required(model, "GPT_LIVE_MODEL_DEPLOYMENT / --live-model"),
         "instructions": FRONTEND_INSTRUCTIONS,
         "store": False,
-        "system_tools": [{"name": "end_conversation"}],
+        "tools": [{"type": "system", "name": "end_conversation"}],
         "audio": {
             "format": {"type": "audio/pcm", "rate": 24000},
             "output": {"voice": required(voice, "--voice")},
@@ -90,33 +86,14 @@ def voice_definition(model: str, voice: str, responses_model: str | None,
         },
     }
     if targets:
-        # A normal Responses function, handled only by the trusted telephone bridge.
-        # Destinations stay in agent-scoped Telephony configuration, never in the prompt.
-        definition["delegation"]["responses"]["tools"] = [{
-            "type": "function", "name": "transfer_call", "strict": True,
-            "description": "Transfer the current telephone call to a configured target at the caller's request.",
-            "parameters": {
-                "type": "object", "additionalProperties": False,
-                "properties": {
-                    "target": {"type": "string", "enum": targets},
-                    "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
-                },
-                "required": ["target", "reason"],
-            },
-        }]
-        definition["instructions"] += (
-            "\nTransfer policy: For an explicit request to speak to a human, delegate to the backend's "
-            "transfer_call tool. Available target names: " + ", ".join(targets) + ". "
-            "Ask which target if ambiguous. In the same turn, tell the caller you will try the transfer. "
-            "Do not say it succeeded. On a failed transfer continue helping on the same call. "
-            "Do not automatically retry, hang up, or invent a number."
-        )
-        definition["delegation"]["responses"]["instructions"] += (
-            "\nFor the frontend's explicit transfer intent, call transfer_call alone with one listed target "
-            "and a short reason. The frontend provides the announcement. Use only the returned outcome; "
-            "accepted is not proof the destination answered. If transfer fails, explain the returned "
-            "limitation and keep helping. Do not automatically retry or call end_conversation."
-        )
+        definition["tools"].append({
+            "type": "system", "name": "transfer", "timeout_seconds": 60,
+            "targets": [{
+                "name": target["name"], "description": target["description"],
+                "destinations": [target["destination"]],
+                "routing": {"strategy": "sequential", "ring_timeout_seconds": 20},
+            } for target in targets],
+        })
     return definition
 
 
@@ -276,7 +253,8 @@ def execute(args, send):
     if args.command == "create":
         body = {
             "name": required(args.agent_name, "--agent-name"),
-            "definition": voice_definition(args.live_model, args.voice, args.responses_model, args.transfer_target),
+            "definition": voice_definition(args.live_model, args.voice, args.responses_model,
+                transfer_targets_body(args.transfer_targets_file)["transfer_targets"] if args.transfer_targets_file else None),
         }
         if args.dry_run:
             return {"method": "POST", "path": "/agents", "body": body}
@@ -358,8 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--voice", default="marin")
     create.add_argument("--responses-model", default=os.getenv("RESPONSES_MODEL_DEPLOYMENT"),
                         help="Model deployment used directly by the Responses backend (not an Agent name)")
-    create.add_argument("--transfer-target", action="append", default=[],
-                        help="Enable voice transfer to this configured target name; repeat for multiple targets")
+    create.add_argument("--transfer-targets-file", help="JSON target configuration used to declare the shared transfer system tool")
     create.add_argument("--dry-run", action="store_true", help="Print JSON without authentication or network calls")
     bind = commands.add_parser("bind", help="Create a SIP binding to an existing connection")
     bind.add_argument("--agent-name", required=True)

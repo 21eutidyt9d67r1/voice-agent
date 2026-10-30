@@ -93,7 +93,7 @@ Use separate calls for these checks:
 | End call | Voice ending followed by provider hangup | Behavior of the Genesys flow after the external SIP leg ends |
 | Context | No automatic summary or reason delivery | Agree an API/UUI/header contract and how the receiving queue/desktop consumes it |
 
-The `reason` argument is model context; this implementation does not forward it
+The transfer system tool's `reason` is model context; this implementation does not forward it
 or a handoff summary to Genesys. Genesys supports
 [User to User Information](https://help.genesys.cloud/articles/about-user-to-user-information-uui/),
 but this sample does not populate UUI. Delivering summaries, caller context, or

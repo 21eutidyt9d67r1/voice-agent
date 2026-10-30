@@ -29,8 +29,8 @@ readiness, and delegation to the Responses model.
   and manage bindings in the specified project.
 - A target region/deployment with SIP ingress, GPT Live, and Live telephony enabled.
   Verify runtime availability and SIP/RTP connectivity separately from resource creation.
-- The service must include Live telephone ending and Responses `transfer_call`
-  execution support. Older versions can reject `system_tools` or return an
+- The service must include shared Live/Realtime system-tool
+  execution support. Older versions can reject `tools` or return an
   unsupported function result. Updating the sample does not deploy that support.
 - A GPT Live deployment and a Responses model deployment available to the project.
 - A **same-project `SipInbound` Connection**, not `SipOutbound`, ACS, or Twilio.
@@ -116,20 +116,25 @@ the backend model deployment directly, not an Agent name. The definition contain
 ```
 
 The sample uses `store=false` and declares
-`"system_tools": [{"name": "end_conversation"}]`. The service owns the ending
+`"tools": [{"type": "system", "name": "end_conversation"}]`. The service owns the ending
 workflow; do not replace this with an ordinary backend function of the same name.
 To enable voice-requested transfer, create the Agent with the configured target names:
 
 ```powershell
-.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-demo --transfer-target human_support --dry-run
-.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-demo --transfer-target human_support
+Copy-Item transfer_targets.example.json transfer_targets.local.json
+# Edit transfer_targets.local.json to use an authorized destination before running create.
+.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-demo --transfer-targets-file transfer_targets.local.json --dry-run
+.venv/Scripts/python sip_voice_agent.py create --agent-name sip-live-demo --transfer-targets-file transfer_targets.local.json
 ```
 
 Use this **instead of** the earlier create command for the same Agent name.
-The function is declared in `delegation.responses.tools` as
-`transfer_call(target, reason)`, with target restricted to the supplied names.
-Concrete numbers stay in Telephony configuration. Configuring targets alone does
-not add a tool to an existing Agent. Recording, SMS, and DTMF remain outside this sample.
+The Agent declares `type: system, name: transfer` in its root `tools`, using the
+same targets, routing and timeout contract as Realtime. Copy the example target
+file and set its authorized number before creating the Agent. The service builds
+any protocol-specific backend schema and invokes the shared system-tool executor;
+customers do not define a Responses transfer function. Destinations are executor
+settings and are not included in the model-facing schema. Recording, SMS, and DTMF
+remain outside this sample.
 
 The dry-run command can also run with just Python and explicit model arguments,
 without Azure credentials, dependencies, or network access:
@@ -258,8 +263,8 @@ retried or rolled back automatically.
 
 Copy `transfer_targets.example.json` to `transfer_targets.local.json` and replace
 the example number with a real, authorized E.164 destination, such as a Genesys
-queue's externally reachable number. Use the same `name` passed to
-`create --transfer-target`. The current SIP provider accepts
+queue's externally reachable number. The same file supplies the Agent system tool during
+`create --transfer-targets-file`. The current SIP provider accepts
 `destination: {"type": "phone_number", "value": "+..."}`; a Genesys queue ID,
 extension, or SIP URI is not an interchangeable destination.
 
@@ -269,7 +274,9 @@ extension, or SIP URI is not an interchangeable destination.
 .venv/Scripts/python sip_voice_agent.py targets --agent-name sip-live-demo --file transfer_targets.local.json --yes
 ```
 
-This replaces the **complete agent-scoped target list**, shared by its bindings.
+The `targets` command replaces the **complete agent-scoped target list** used by
+operator `transfer` commands. Voice system-tool targets are in the immutable Agent
+definition created above; changing the operator list does not rewrite that Agent version.
 The command GETs the current ETag and sends `If-Match` on PUT; it stops on a
 missing ETag or conflict. An empty array clears all targets. Inspect the result
 after a timeout before deciding whether to retry.

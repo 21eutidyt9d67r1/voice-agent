@@ -36,30 +36,29 @@ class SampleTests(unittest.TestCase):
             "format": {"type": "audio/pcm", "rate": 24000}, "output": {"voice": "marin"},
         })
         self.assertFalse(definition["store"])
-        self.assertEqual(definition["system_tools"], [{"name": "end_conversation"}])
+        self.assertEqual(definition["tools"], [{"type": "system", "name": "end_conversation"}])
         self.assertEqual(definition["delegation"], {
             "type": "responses",
             "responses": {"model": "responses-deployment", "instructions": sample.BACKEND_INSTRUCTIONS},
         })
-        for key in ("live_config", "greeting", "tools", "conversation_engine", "turn_detection"):
+        for key in ("live_config", "greeting", "system_tools", "conversation_engine", "turn_detection"):
             self.assertNotIn(key, definition)
         self.assertIn("Delegate to the backend", definition["instructions"])
 
-    def test_create_voice_transfer_is_explicit_and_destinations_stay_out_of_model_definition(self):
+    def test_create_voice_transfer_uses_same_system_contract_as_realtime(self):
+        path = Path(__file__).resolve().parents[1] / "transfer_targets.example.json"
         result = sample.execute(self.args(
             "create", "--agent-name", "demo", "--live-model", "live", "--responses-model", "responses",
-            "--transfer-target", "human_support", "--transfer-target", "sales", "--dry-run",
+            "--transfer-targets-file", str(path), "--dry-run",
         ), None)
         definition = result["body"]["definition"]
-        tool = definition["delegation"]["responses"]["tools"][0]
-        self.assertEqual(tool["name"], "transfer_call")
-        self.assertEqual(tool["parameters"]["properties"]["target"]["enum"], ["human_support", "sales"])
-        self.assertEqual(tool["parameters"]["required"], ["target", "reason"])
-        self.assertFalse(tool["parameters"]["additionalProperties"])
-        self.assertNotIn('"destination":', json.dumps(definition))
-        for targets in (["support", "support"], ["sip:user@example.test"], ["+14255550100"]):
-            with self.subTest(targets=targets), self.assertRaises(ValueError):
-                sample.voice_definition("live", "marin", "responses", targets)
+        tool = definition["tools"][1]
+        self.assertEqual((tool["type"], tool["name"]), ("system", "transfer"))
+        self.assertEqual(tool["targets"][0]["name"], "human_support")
+        self.assertEqual(tool["targets"][0]["routing"], {"strategy": "sequential", "ring_timeout_seconds": 20})
+        self.assertNotIn("tools", definition["delegation"]["responses"])
+        self.assertNotIn("system_tools", definition)
+        self.assertNotIn("+14255550100", definition["instructions"])
 
     def test_targets_replacement_uses_etag_and_replaces_exact_file(self):
         body = {"transfer_targets": [{
