@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 TOKEN_SCOPE = "https://ai.azure.com/.default"
@@ -27,16 +28,19 @@ Backend tools:
 Delegate to the backend when the caller asks a substantive question.
 Do not delegate greetings, short clarifications, or repetition of an answer already received.
 Do not guess while waiting. Deliver the backend's answer naturally, without markdown.
-You have no call-control tools. Do not claim to transfer calls, send messages, or hang up."""
+Closing policy: When the caller explicitly finishes or asks to hang up, use the platform's
+end_conversation capability. Follow its farewell and delegation instructions.
+Never claim to send messages or perform an unavailable action."""
 
 BACKEND_INSTRUCTIONS = """Help a telephone assistant answer the caller's question.
 Return a concise, speech-friendly answer in the caller's language, usually one or two sentences.
 Treat transcripts as imperfect; ask for clarification when needed. Do not invent facts or actions.
-Do not claim to use tools, transfer calls, send messages, or hang up."""
+Follow the platform's end_conversation instructions when the frontend delegates an explicit ending.
+Do not claim to send messages or perform an unavailable action."""
 
 
 def required(value: str | None, name: str) -> str:
-    if not value or not value.strip():
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} is required")
     return value.strip()
 
@@ -60,12 +64,19 @@ def project_endpoint(value: str | None) -> str:
     return endpoint
 
 
-def voice_definition(model: str, voice: str, responses_model: str | None) -> dict:
-    return {
+def voice_definition(model: str, voice: str, responses_model: str | None,
+                     transfer_targets: list[str] | None = None) -> dict:
+    targets = [target_name(name) for name in transfer_targets or []]
+    if len(targets) > 128:
+        raise ValueError("Configure at most 128 transfer target names")
+    if len({name.lower() for name in targets}) != len(targets):
+        raise ValueError("Transfer target names must be unique")
+    definition = {
         "kind": "voice", "sub_protocol": "live", "model_type": "self_deployed",
         "model": required(model, "GPT_LIVE_MODEL_DEPLOYMENT / --live-model"),
         "instructions": FRONTEND_INSTRUCTIONS,
         "store": False,
+        "system_tools": [{"name": "end_conversation"}],
         "audio": {
             "format": {"type": "audio/pcm", "rate": 24000},
             "output": {"voice": required(voice, "--voice")},
@@ -78,6 +89,64 @@ def voice_definition(model: str, voice: str, responses_model: str | None) -> dic
             },
         },
     }
+    if targets:
+        # A normal Responses function, handled only by the trusted telephone bridge.
+        # Destinations stay in agent-scoped Telephony configuration, never in the prompt.
+        definition["delegation"]["responses"]["tools"] = [{
+            "type": "function", "name": "transfer_call", "strict": True,
+            "description": "Transfer the current telephone call to a configured target at the caller's request.",
+            "parameters": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "target": {"type": "string", "enum": targets},
+                    "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+                },
+                "required": ["target", "reason"],
+            },
+        }]
+        definition["instructions"] += (
+            "\nTransfer policy: For an explicit request to speak to a human, delegate to the backend's "
+            "transfer_call tool. Available target names: " + ", ".join(targets) + ". "
+            "Ask which target if ambiguous. In the same turn, tell the caller you will try the transfer. "
+            "Do not say it succeeded. On a failed transfer continue helping on the same call. "
+            "Do not automatically retry, hang up, or invent a number."
+        )
+        definition["delegation"]["responses"]["instructions"] += (
+            "\nFor the frontend's explicit transfer intent, call transfer_call alone with one listed target "
+            "and a short reason. The frontend provides the announcement. Use only the returned outcome; "
+            "accepted is not proof the destination answered. If transfer fails, explain the returned "
+            "limitation and keep helping. Do not automatically retry or call end_conversation."
+        )
+    return definition
+
+
+def target_name(value: str) -> str:
+    value = required(value, "transfer target name")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
+        raise ValueError("Transfer target names use 1-64 letters, digits, '_' or '-', starting with a letter or digit")
+    return value
+
+
+def transfer_targets_body(filename: str) -> dict:
+    body = json.loads(Path(filename).read_text(encoding="utf-8"))
+    if not isinstance(body, dict) or set(body) != {"transfer_targets"} or not isinstance(body["transfer_targets"], list):
+        raise ValueError("Targets file must contain only a transfer_targets array")
+    names = set()
+    for target in body["transfer_targets"]:
+        if not isinstance(target, dict) or set(target) != {"name", "description", "destination"}:
+            raise ValueError("Each target requires name, description, and destination")
+        name = target_name(target["name"])
+        if name != target["name"] or name.lower() in names:
+            raise ValueError("Transfer target names must be unique and have no surrounding whitespace")
+        names.add(name.lower())
+        required(target["description"], "transfer target description")
+        destination = target["destination"]
+        if (not isinstance(destination, dict) or set(destination) != {"type", "value"}
+                or destination["type"] != "phone_number"
+                or not isinstance(destination["value"], str)
+                or not re.fullmatch(r"\+[1-9]\d{6,14}", destination["value"])):
+            raise ValueError("This SIP sample supports destination.type=phone_number with an E.164 value")
+    return body
 
 
 def binding_body(connection: str, allowed_callers: list[str]) -> dict:
@@ -207,7 +276,7 @@ def execute(args, send):
     if args.command == "create":
         body = {
             "name": required(args.agent_name, "--agent-name"),
-            "definition": voice_definition(args.live_model, args.voice, args.responses_model),
+            "definition": voice_definition(args.live_model, args.voice, args.responses_model, args.transfer_target),
         }
         if args.dry_run:
             return {"method": "POST", "path": "/agents", "body": body}
@@ -215,6 +284,32 @@ def execute(args, send):
 
     path = agent_path(args.agent_name)
     bindings = path + "/telephony/bindings"
+    if args.command == "targets":
+        targets_path = path + "/telephony/transfer_targets"
+        if not args.file:
+            if args.dry_run:
+                return {"method": "GET", "path": targets_path}
+            response = send("GET", targets_path)
+            return {"configuration": response.json(), "etag": response.headers.get("ETag")}
+        body = transfer_targets_body(args.file)
+        if args.dry_run:
+            return {"method": "GET", "path": targets_path, "then": {
+                "method": "PUT", "path": targets_path, "headers": {"If-Match": "<ETag from GET>"}, "body": body,
+            }}
+        if not args.yes:
+            raise ValueError("Pass --yes to replace the agent's complete transfer-target configuration")
+        current = send("GET", targets_path)
+        etag = current.headers.get("ETag")
+        if not etag or not etag.strip() or etag == "*":
+            raise RuntimeError("Targets GET returned no usable ETag; no PUT was sent")
+        response = send("PUT", targets_path, json=body, headers={"If-Match": etag})
+        return {"configuration": response.json(), "etag": response.headers.get("ETag")}
+    if args.command in ("transfer", "end"):
+        call_path = path + "/telephony/calls/" + quote(required(args.call_id, "--call-id"), safe="")
+        kwargs = {"json": {"target": target_name(args.target)}} if args.command == "transfer" else {}
+        if args.dry_run:
+            return {"method": "POST", "path": call_path + ":" + args.command, **kwargs}
+        return send("POST", call_path + ":" + args.command, **kwargs).json()
     if args.command == "bind":
         body = binding_body(args.connection, args.allowed_caller)
         if args.dry_run:
@@ -263,6 +358,8 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--voice", default="marin")
     create.add_argument("--responses-model", default=os.getenv("RESPONSES_MODEL_DEPLOYMENT"),
                         help="Model deployment used directly by the Responses backend (not an Agent name)")
+    create.add_argument("--transfer-target", action="append", default=[],
+                        help="Enable voice transfer to this configured target name; repeat for multiple targets")
     create.add_argument("--dry-run", action="store_true", help="Print JSON without authentication or network calls")
     bind = commands.add_parser("bind", help="Create a SIP binding to an existing connection")
     bind.add_argument("--agent-name", required=True)
@@ -275,6 +372,18 @@ def build_parser() -> argparse.ArgumentParser:
     calls = commands.add_parser("calls", help="Read a call or the latest SIP call page")
     calls.add_argument("--agent-name", required=True)
     calls.add_argument("--call-id")
+    targets = commands.add_parser("targets", help="Read or replace agent-scoped transfer targets")
+    targets.add_argument("--agent-name", required=True)
+    targets.add_argument("--file", help="JSON file containing the complete transfer_targets configuration")
+    targets.add_argument("--yes", action="store_true", help="Replace all targets, including clearing with an empty array")
+    targets.add_argument("--dry-run", action="store_true")
+    for command in ("transfer", "end"):
+        control = commands.add_parser(command, help=f"Request {command} of one active call (no automatic retry)")
+        control.add_argument("--agent-name", required=True)
+        control.add_argument("--call-id", required=True)
+        if command == "transfer":
+            control.add_argument("--target", required=True, help="Configured transfer target name, never a number or URI")
+        control.add_argument("--dry-run", action="store_true")
     unbind = commands.add_parser("unbind", help="Remove only the named SIP binding; retain agent/connection")
     unbind.add_argument("--agent-name", required=True)
     unbind.add_argument("--binding-id", required=True)
@@ -312,6 +421,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, RuntimeError, ModuleNotFoundError) as error:
+    except (ValueError, RuntimeError, ModuleNotFoundError, OSError) as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(1) from error

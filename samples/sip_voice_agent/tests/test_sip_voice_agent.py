@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,6 +36,7 @@ class SampleTests(unittest.TestCase):
             "format": {"type": "audio/pcm", "rate": 24000}, "output": {"voice": "marin"},
         })
         self.assertFalse(definition["store"])
+        self.assertEqual(definition["system_tools"], [{"name": "end_conversation"}])
         self.assertEqual(definition["delegation"], {
             "type": "responses",
             "responses": {"model": "responses-deployment", "instructions": sample.BACKEND_INSTRUCTIONS},
@@ -42,6 +44,86 @@ class SampleTests(unittest.TestCase):
         for key in ("live_config", "greeting", "tools", "conversation_engine", "turn_detection"):
             self.assertNotIn(key, definition)
         self.assertIn("Delegate to the backend", definition["instructions"])
+
+    def test_create_voice_transfer_is_explicit_and_destinations_stay_out_of_model_definition(self):
+        result = sample.execute(self.args(
+            "create", "--agent-name", "demo", "--live-model", "live", "--responses-model", "responses",
+            "--transfer-target", "human_support", "--transfer-target", "sales", "--dry-run",
+        ), None)
+        definition = result["body"]["definition"]
+        tool = definition["delegation"]["responses"]["tools"][0]
+        self.assertEqual(tool["name"], "transfer_call")
+        self.assertEqual(tool["parameters"]["properties"]["target"]["enum"], ["human_support", "sales"])
+        self.assertEqual(tool["parameters"]["required"], ["target", "reason"])
+        self.assertFalse(tool["parameters"]["additionalProperties"])
+        self.assertNotIn('"destination":', json.dumps(definition))
+        for targets in (["support", "support"], ["sip:user@example.test"], ["+14255550100"]):
+            with self.subTest(targets=targets), self.assertRaises(ValueError):
+                sample.voice_definition("live", "marin", "responses", targets)
+
+    def test_targets_replacement_uses_etag_and_replaces_exact_file(self):
+        body = {"transfer_targets": [{
+            "name": "support", "description": "Human support",
+            "destination": {"type": "phone_number", "value": "+14255550100"},
+        }]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "targets.json"
+            path.write_text(json.dumps(body), encoding="utf-8")
+            send = Mock(side_effect=[response({}, headers={"ETag": '"old"'}), response(body, headers={"ETag": '"new"'})])
+            result = sample.execute(self.args("targets", "--agent-name", "demo", "--file", str(path), "--yes"), send)
+            self.assertEqual(result, {"configuration": body, "etag": '"new"'})
+            self.assertEqual(send.call_args.kwargs, {"json": body, "headers": {"If-Match": '"old"'}})
+
+    def test_targets_preview_is_offline_and_live_replace_requires_yes_and_etag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "targets.json"
+            path.write_text('{"transfer_targets": []}', encoding="utf-8")
+            args = self.args("targets", "--agent-name", "demo", "--file", str(path), "--dry-run")
+            send = Mock(side_effect=AssertionError("offline"))
+            self.assertEqual(sample.execute(args, send)["then"]["body"], {"transfer_targets": []})
+            send.assert_not_called()
+            args.dry_run = False
+            with self.assertRaises(ValueError):
+                sample.execute(args, send)
+            send.assert_not_called()
+            args.yes = True
+            for etag in (None, " ", "*"):
+                with self.subTest(etag=etag):
+                    send = Mock(return_value=response({}, headers={"ETag": etag}))
+                    with self.assertRaises(RuntimeError):
+                        sample.execute(args, send)
+                    self.assertEqual(send.call_count, 1)
+
+    def test_invalid_targets_never_send_http(self):
+        for body in (
+            {}, {"transfer_targets": None}, {"transfer_targets": [{}]},
+            {"transfer_targets": [{"name": "support", "description": "Human", "destination": {"type": "sip", "value": "sip:user@example.test"}}]},
+        ):
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "targets.json"
+                path.write_text(json.dumps(body), encoding="utf-8")
+                send = Mock()
+                with self.assertRaises(ValueError):
+                    sample.execute(self.args("targets", "--agent-name", "demo", "--file", str(path), "--yes"), send)
+                send.assert_not_called()
+
+    def test_call_controls_use_service_call_id_and_only_target_name(self):
+        for command, extra, kwargs in (("transfer", ["--target", "support"], {"json": {"target": "support"}}), ("end", [], {})):
+            with self.subTest(command=command):
+                args = self.args(command, "--agent-name", "a/b", "--call-id", "c?x=1", *extra)
+                send = Mock(return_value=response({"status": "managing"}))
+                sample.execute(args, send)
+                send.assert_called_once_with("POST", f"/agents/a%2Fb/telephony/calls/c%3Fx%3D1:{command}", **kwargs)
+                args.dry_run = True
+                send.reset_mock()
+                self.assertEqual(sample.execute(args, send)["method"], "POST")
+                send.assert_not_called()
+
+    def test_mutating_control_timeout_is_not_retried(self):
+        send = Mock(side_effect=TimeoutError("Outcome unknown"))
+        with self.assertRaises(TimeoutError):
+            sample.execute(self.args("transfer", "--agent-name", "demo", "--call-id", "call", "--target", "support"), send)
+        send.assert_called_once()
 
     def test_responses_deployment_uses_environment_or_explicit_cli_override(self):
         environment = {"GPT_LIVE_MODEL_DEPLOYMENT": "live", "RESPONSES_MODEL_DEPLOYMENT": "env-responses"}
