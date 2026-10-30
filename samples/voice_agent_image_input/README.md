@@ -25,7 +25,7 @@ sequenceDiagram
     participant Local as Local server.py
     participant Agent as Foundry Voice Agent
     Browser->>Local: Text / image data URLs / JPEG frames / PCM over same-origin WebSocket
-    Local->>Local: Validate type, size, count; build conversation items
+    Local->>Local: Validate type, size and count, then build conversation items
     Local->>Agent: conversation.item.create (input_text + input_image)
     Local->>Agent: response.create (questions only, not camera frames)
     Agent-->>Local: Audio deltas + transcript deltas + response.done
