@@ -28,6 +28,7 @@ an existing customer-hosted MCP does not need a local tunnel.
 | [Add voice to an existing customer agent](existing_agent_voice_design/README.md) | Design guide: use a Hosted Agent as the Foundry Voice Agent conversation engine to connect managed voice to an existing customer agent or API endpoint. Includes a high-level architecture diagram; not a runnable sample. |
 | [Google ADK with an existing Voice Agent](adk_voice_agent/README.md) | One ADK live-audio application with configuration-only selection of Gemini Live or an existing Foundry Voice Agent, SDK transport, PCM resampling, transcripts, interruption handling, and offline tests. |
 | [Voice Live to Voice Agent migration](voice_live_to_voice_agent/README.md) | Compare the same Azure Speech -> GPT-4.1 mini -> Azure TTS cascade and shared local functions before and after migration. Includes dynamic session context and mid-session instruction-update examples. |
+| [Voice Agent with image and camera input](voice_agent_image_input/README.md) | Send text, uploaded images, or sampled camera frames as `input_image` parts and hear the answer. Includes a loopback web UI, a latency-measuring CLI, a bounded camera-frame window, sizing guidance, and direct-vs-separate-vision integration patterns. |
 | [Vehicle voice agent with local tools](vehicle_local_tools/README.md) | Web cockpit with cloud voice interaction and locally executed simulated climate, media, and navigation functions. Includes an offline dashboard, local policy enforcement, and a tool execution log. |
 | [Long tool waits with spoken reminders](long_tool_wait/README.md) | Keep callers informed during slow local tools using out-of-band Voice Agent speech, with both GPT Realtime and an Azure Speech / GPT-5.4 pipeline. |
 | [Language learning with pronunciation assessment](language_learning/README.md) | Have a hands-free conversation with a voice coach that asks you to read specified sentences, then gives per-sentence and word-level feedback through an Azure Speech Pronunciation Assessment function tool. Supports spoken retries and a WAV-file mode. |
@@ -128,7 +129,7 @@ this voice-first Agent sample.
 
 ## Choose the right setup
 
-The Voice Live migration, Finance, Elevator, language-learning, vehicle-local-tools, long-tool-wait, and documentation-generated voice web
+The Voice Live migration, Finance, Elevator, language-learning, vehicle-local-tools, image-input, long-tool-wait, and documentation-generated voice web
 samples use their own `requirements.txt` files. The voice web sample uses a standalone HTTP/WebSocket
 backend and does not require the Projects SDK; follow its README for setup.
 The common Python SDK samples require `azure-ai-projects>=2.7.0` from PyPI.
