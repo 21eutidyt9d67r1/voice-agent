@@ -1,0 +1,4 @@
+aiohttp==3.14.5
+azure-identity==1.25.3
+python-dotenv==1.2.3
+sounddevice==0.5.6
