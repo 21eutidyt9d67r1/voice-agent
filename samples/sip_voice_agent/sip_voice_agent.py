@@ -121,7 +121,7 @@ def transfer_targets_body(filename: str) -> dict:
         if (not isinstance(destination, dict) or set(destination) != {"type", "value"}
                 or destination["type"] != "phone_number"
                 or not isinstance(destination["value"], str)
-                or not re.fullmatch(r"\+[1-9]\d{6,14}", destination["value"])):
+                or not re.fullmatch(r"\+[1-9][0-9]{6,14}", destination["value"])):
             raise ValueError("This SIP sample supports destination.type=phone_number with an E.164 value")
     return body
 

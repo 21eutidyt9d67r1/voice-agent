@@ -106,6 +106,25 @@ class SampleTests(unittest.TestCase):
                     sample.execute(self.args("targets", "--agent-name", "demo", "--file", str(path), "--yes"), send)
                 send.assert_not_called()
 
+    def test_localized_digits_are_rejected_before_agent_or_target_requests(self):
+        for number in ("+1４２５５５５０１００", "+1٤٢٥٥٥٥٠١٠٠"):
+            with self.subTest(number=number), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "targets.json"
+                path.write_text(json.dumps({"transfer_targets": [{
+                    "name": "support", "description": "Human support",
+                    "destination": {"type": "phone_number", "value": number},
+                }]}), encoding="utf-8")
+                for values in (
+                    ("targets", "--agent-name", "demo", "--file", str(path), "--yes"),
+                    ("create", "--agent-name", "demo", "--live-model", "live", "--responses-model", "backend",
+                     "--transfer-targets-file", str(path)),
+                ):
+                    for preview in ([], ["--dry-run"]):
+                        send = Mock()
+                        with self.assertRaises(ValueError):
+                            sample.execute(self.args(*values, *preview), send)
+                        send.assert_not_called()
+
     def test_call_controls_use_service_call_id_and_only_target_name(self):
         for command, extra, kwargs in (("transfer", ["--target", "support"], {"json": {"target": "support"}}), ("end", [], {})):
             with self.subTest(command=command):
